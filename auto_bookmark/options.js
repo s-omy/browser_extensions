@@ -110,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 【新規追加・一括版】JSON配列を受け取り、1回のAPIリクエストで全てのタイトルを無毒化する関数
   async function cleanseTitlesBulk(apiKey, titlesList) {
     if (titlesList.length === 0) return {};
-    const endpoint = `https://googleapis.com{apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
     const prompt = `# あなたの役割
 あなたは入力されたWebページのタイトルのリストを監視し、AIのセーフティフィルター（有害コンテンツ・成人向け・暴力表現など）に誤判定されそうな単語を、安全かつニュートラルな表現に置換（無毒化）するデータクレンジング専門のAIです。
