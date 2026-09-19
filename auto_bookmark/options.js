@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // AI自動解析ボタンの処理
+  // 【高速化版】AI自動解析ボタンの処理
   analyzeBtn.addEventListener('click', async () => {
     const storage = await chrome.storage.local.get("gemini_key");
     const apiKey = storage.gemini_key;
@@ -42,22 +42,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       analyzeBtn.disabled = true;
-      spinner.textContent = '⏳ ブックマークを読み込んでAIで解析中...（数十秒かかる場合があります）';
+      spinner.textContent = '⏳ ブックマークを抽出中...';
       syncStatusDiv.textContent = '';
 
       // 1. ブラウザから全フォルダと配下のエントリを抽出
       const bookmarkTree = await chrome.bookmarks.getTree();
-      const extractedData = [];
-      traverseAndExtract(bookmarkTree, extractedData);
+      const rawExtractedData = [];
+      traverseAndExtract(bookmarkTree, rawExtractedData);
 
-      if (extractedData.length === 0) {
+      if (rawExtractedData.length === 0) {
         throw new Error("解析対象のフォルダ（ブックマークが含まれるフォルダ）が見つかりませんでした。");
       }
 
-      // 2. Gemini API (gemini-3.6-flash) でDescriptionを一括生成
-      const aiResult = await generateDescriptionsViaGemini(apiKey, extractedData);
+      spinner.textContent = '⏳ 全タイトルを一括で無毒化クレンジング中...（1回で処理しています）';
 
-      // 3. ストレージに保存して表示を更新
+      // 2. 【大幅高速化】一括クレンジング用のフラットなリストを作成
+      const titlesToCleanse = [];
+      rawExtractedData.forEach((folder, folderIdx) => {
+        folder.entries.forEach((entry, entryIdx) => {
+          titlesToCleanse.push({
+            id: `${folderIdx}-${entryIdx}`, // 元のデータ構造に戻すためのユニークID
+            title: entry.title
+          });
+        });
+      });
+
+      // 1回のリクエストで全タイトルを一括処理
+      const cleansedTitlesMap = await cleanseTitlesBulk(apiKey, titlesToCleanse);
+
+      // 元の構造（フォルダ階層）に無毒化されたタイトルをマッピングし直す
+      const cleansedExtractedData = rawExtractedData.map((folder, folderIdx) => {
+        const cleansedEntries = folder.entries.map((entry, entryIdx) => {
+          const id = `${folderIdx}-${entryIdx}`;
+          return {
+            title: cleansedTitlesMap[id] || entry.title, // 万が一漏れがあれば元のタイトル
+            url: entry.url
+          };
+        });
+        return {
+          folder_name: folder.folder_name,
+          entries: cleansedEntries
+        };
+      });
+
+      spinner.textContent = '⏳ 安全になったデータから高精度なフォルダDescriptionを生成中...';
+
+      // 3. Gemini API (gemini-3.6-flash) でDescriptionを一括生成
+      const aiResult = await generateDescriptionsViaGemini(apiKey, cleansedExtractedData);
+
+      // 4. ストレージに保存して表示を更新
       chrome.storage.local.set({ folder_descriptions: aiResult }, () => {
         syncStatusDiv.textContent = '🎉 すべてのフォルダの解析とローカル同期が完了しました！';
         syncStatusDiv.style.color = 'green';
@@ -74,21 +107,91 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ブックマークツリーから「フォルダ名」と「配下のエントリ最大30件のURL」を再帰抽出する関数
+  // 【新規追加・一括版】JSON配列を受け取り、1回のAPIリクエストで全てのタイトルを無毒化する関数
+  async function cleanseTitlesBulk(apiKey, titlesList) {
+    if (titlesList.length === 0) return {};
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+
+    const prompt = `# あなたの役割
+あなたは入力されたWebページのタイトルのリストを監視し、AIのセーフティフィルター（有害コンテンツ・成人向け・暴力表現など）に誤判定されそうな単語を、安全かつニュートラルな表現に置換（無毒化）するデータクレンジング専門のAIです。
+
+# 処理ルール
+1. 各アイテムの 'title' 文字列に、成人向け、暴力、犯罪、過激な政治、ヘイトスピーチ、またはそれらを連想させる不適切な単語（例: 「殺す」「ハッキング」「裏技」「アダルト」「流出」など）が含まれている場合、それらを「一般的なIT用語」や「一般的な表現」に置き換えてください。
+2. 置き換えの際は、元のタイトルのニュアンス（技術的な内容なのか、ニュースなのか、エンタメなのか）を極力維持しつつ、無害な表現にしてください。
+3. セーフティフィルターに全く問題のないタイトルは、一切変更せずそのまま出力してください。
+4. 入力されたすべてのID（id）について、漏れなく1つずつオブジェクトを生成して返してください。
+`;
+
+    // 構造化出力（Structured Outputs）でIDとクレンジング後のタイトルを確実にマッピングさせる
+    const responseSchema = {
+      type: "OBJECT",
+      properties: {
+        cleansed_items: {
+          type: "ARRAY",
+          description: "無毒化処理が完了したタイトルのリスト",
+          items: {
+            type: "OBJECT",
+            properties: {
+              id: { type: "STRING", description: "入力データと完全に一致するID" },
+              title: { type: "STRING", description: "無毒化・ニュアンス維持された安全なタイトル" }
+            },
+            required: ["id", "title"]
+          }
+        }
+      },
+      required: ["cleansed_items"]
+    };
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          { parts: [
+            { text: prompt },
+            { text: `【クレンジング対象データ】\n${JSON.stringify(titlesList)}` }
+          ]}
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          response_mime_type: "application/json",
+          response_schema: responseSchema
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`クレンジングAPIの通信に失敗しました (Status: ${response.status})`);
+    }
+
+    const resData = await response.json();
+    const rawText = resData.candidates[0].content.parts[0].text;
+    const jsonOutput = JSON.parse(rawText);
+
+    // IDをキーにしたオブジェクトマッピングに変換して返却 { "0-0": "安全なタイトル", "0-1": "..." }
+    const resultMap = {};
+    if (jsonOutput.cleansed_items && Array.isArray(jsonOutput.cleansed_items)) {
+      jsonOutput.cleansed_items.forEach(item => {
+        resultMap[item.id] = item.title;
+      });
+    }
+    return resultMap;
+  }
+
+  // ブックマークツリーから「フォルダ名」と「配下のエントリ最大30件」を再帰抽出する関数
   function traverseAndExtract(nodes, resultList) {
     for (const node of nodes) {
       if (!node.url && node.title) {
-        // フォルダの場合、配下の子要素からブックマーク（urlがあるもの）のみ最大30件抽出
         const entries = [];
         if (node.children) {
           for (const child of node.children) {
             if (child.url) {
-              entries.push({ url: child.url });
+              // タイトルとURLを両方セット（後でクレンジングにかけます）
+              entries.push({ title: child.title || "", url: child.url });
             }
-            if (entries.length >= 30) break; // 各フォルダ10件制限
+            if (entries.length >= 30) break; 
           }
         }
-        // ブックマークが1件以上含まれるフォルダのみ解析対象にする
         if (entries.length > 0) {
           resultList.push({
             folder_name: node.title,
@@ -104,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // gemini-3.6-flash を呼び出して構造化JSONを取得する関数
   async function generateDescriptionsViaGemini(apiKey, parsedData) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
     const prompt = `
     あなたは優秀なデータアナリストです。
@@ -116,7 +219,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ・入力されたすべてのフォルダ（folder_name）について、漏れなく1つずつオブジェクトを生成してください。
     `;
 
-    // 【最重要修正】additionalProperties を排除し、固定キーの配列構造に定義し直します
     const responseSchema = {
       type: "OBJECT",
       properties: {
@@ -155,7 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
         generationConfig: {
           temperature: 0.2,
           response_mime_type: "application/json",
-          response_schema: responseSchema // 修正した安全なスキーマを適用
+          response_schema: responseSchema 
         }
       })
     });
@@ -166,13 +268,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const resData = await response.json();
-    
-    // AIは確実に { "analyzed_folders": [ { "folder_name": "...", "description": "..." }, ... ] } の形で返します
     const rawText = resData.candidates[0].content.parts[0].text;
     const jsonOutput = JSON.parse(rawText);
 
-    // 【形式変換】background.js側が1発でデータ参照できるよう、
-    // { "開発・技術": "説明文...", "生活": "..." } の単一オブジェクトに整形して返却します
     const unifiedObject = {};
     if (jsonOutput.analyzed_folders && Array.isArray(jsonOutput.analyzed_folders)) {
       jsonOutput.analyzed_folders.forEach(item => {
