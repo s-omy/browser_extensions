@@ -8,7 +8,8 @@
     "bookmarks",
     "tabs",
     "storage",
-    "notifications" 
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*"
