@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Neat AI Bookmark 設定</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 600px; }
+    .field { margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
+    label { display: block; font-weight: bold; margin-bottom: 5px; }
+    input[type="password"] { width: 100%; padding: 8px; box-sizing: border-box; }
+    button { padding: 8px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    button.action-btn { background: #28a745; font-size: 14px; font-weight: bold; }
+    #status, #sync-status { margin-top: 10px; font-weight: bold; }
+    .desc-preview { background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 12px; max-height: 250px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; }
+    .loader { display: inline-block; margin-left: 10px; color: #6c757d; }
+  </style>
+</head>
+<body>
+  <h2>Neat AI Bookmark Manager 設定</h2>
+  
+  <!-- APIキー設定セクション -->
+  <div class="field">
+    <label for="api-key">Gemini API キー (Pay-per-request):</label>
+    <input type="password" id="api-key" placeholder="APIキーを入力">
+    <button id="save-btn" style="margin-top: 10px;">キーを保存</button>
+    <div id="status"></div>
+  </div>
+
+  <!-- 拡張機能内で完結させるAI解析セクション -->
+  <div class="field">
+    <label>フォルダコンテキストの自動解析・同期:</label>
+    <p style="font-size: 13px; color: #6c757d; margin-top: 0;">現在のブラウザのブックマークフォルダと配下のページ（各最大10件）を直接抽出し、GeminiでDescriptionを生成・更新します。</p>
+    <button id="analyze-btn" class="action-btn">🔄 AIで全フォルダを解析・更新する</button>
+    <span id="loading-spinner" class="loader"></span>
+    <div id="sync-status"></div>
+    <h4 style="margin-bottom: 5px;">現在の同期済みフォルダ数: <span id="category-count">0</span></h4>
+    <div id="desc-list" class="desc-preview">同期されたデータはありません</div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
