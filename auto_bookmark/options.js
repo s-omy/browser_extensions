@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // AI自動解析ボタンの処理
+  // 【高速化版】AI自動解析ボタンの処理
   analyzeBtn.addEventListener('click', async () => {
     const storage = await chrome.storage.local.get("gemini_key");
     const apiKey = storage.gemini_key;
@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       analyzeBtn.disabled = true;
-      spinner.textContent = '⏳ ブックマークを読み込んでAIで無毒化クレンジング＆解析中...（しばらくお待ちください）';
+      spinner.textContent = '⏳ ブックマークを抽出中...';
       syncStatusDiv.textContent = '';
 
       // 1. ブラウザから全フォルダと配下のエントリを抽出
@@ -54,22 +54,40 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error("解析対象のフォルダ（ブックマークが含まれるフォルダ）が見つかりませんでした。");
       }
 
-      // 2. 【新規強化】全エントリのタイトルを一括で事前に無毒化
-      const cleansedExtractedData = [];
-      for (const folder of rawExtractedData) {
-        const cleansedEntries = [];
-        for (const entry of folder.entries) {
-          // 独立した単独クレンジングを実処理の前に適用
-          const cleanTitle = await cleanseText(apiKey, entry.title, "ブックマークのタイトル");
-          cleansedEntries.push({ title: cleanTitle, url: entry.url });
-        }
-        cleansedExtractedData.push({
+      spinner.textContent = '⏳ 全タイトルを一括で無毒化クレンジング中...（1回で処理しています）';
+
+      // 2. 【大幅高速化】一括クレンジング用のフラットなリストを作成
+      const titlesToCleanse = [];
+      rawExtractedData.forEach((folder, folderIdx) => {
+        folder.entries.forEach((entry, entryIdx) => {
+          titlesToCleanse.push({
+            id: `${folderIdx}-${entryIdx}`, // 元のデータ構造に戻すためのユニークID
+            title: entry.title
+          });
+        });
+      });
+
+      // 1回のリクエストで全タイトルを一括処理
+      const cleansedTitlesMap = await cleanseTitlesBulk(apiKey, titlesToCleanse);
+
+      // 元の構造（フォルダ階層）に無毒化されたタイトルをマッピングし直す
+      const cleansedExtractedData = rawExtractedData.map((folder, folderIdx) => {
+        const cleansedEntries = folder.entries.map((entry, entryIdx) => {
+          const id = `${folderIdx}-${entryIdx}`;
+          return {
+            title: cleansedTitlesMap[id] || entry.title, // 万が一漏れがあれば元のタイトル
+            url: entry.url
+          };
+        });
+        return {
           folder_name: folder.folder_name,
           entries: cleansedEntries
-        });
-      }
+        };
+      });
 
-      // 3. Gemini API (gemini-3.6-flash) で安全になったデータからDescriptionを一括生成
+      spinner.textContent = '⏳ 安全になったデータから高精度なフォルダDescriptionを生成中...';
+
+      // 3. Gemini API (gemini-3.6-flash) でDescriptionを一括生成
       const aiResult = await generateDescriptionsViaGemini(apiKey, cleansedExtractedData);
 
       // 4. ストレージに保存して表示を更新
@@ -88,6 +106,77 @@ document.addEventListener('DOMContentLoaded', () => {
       spinner.textContent = '';
     }
   });
+
+  // 【新規追加・一括版】JSON配列を受け取り、1回のAPIリクエストで全てのタイトルを無毒化する関数
+  async function cleanseTitlesBulk(apiKey, titlesList) {
+    if (titlesList.length === 0) return {};
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+
+    const prompt = `# あなたの役割
+あなたは入力されたWebページのタイトルのリストを監視し、AIのセーフティフィルター（有害コンテンツ・成人向け・暴力表現など）に誤判定されそうな単語を、安全かつニュートラルな表現に置換（無毒化）するデータクレンジング専門のAIです。
+
+# 処理ルール
+1. 各アイテムの 'title' 文字列に、成人向け、暴力、犯罪、過激な政治、ヘイトスピーチ、またはそれらを連想させる不適切な単語（例: 「殺す」「ハッキング」「裏技」「アダルト」「流出」など）が含まれている場合、それらを「一般的なIT用語」や「一般的な表現」に置き換えてください。
+2. 置き換えの際は、元のタイトルのニュアンス（技術的な内容なのか、ニュースなのか、エンタメなのか）を極力維持しつつ、無害な表現にしてください。
+3. セーフティフィルターに全く問題のないタイトルは、一切変更せずそのまま出力してください。
+4. 入力されたすべてのID（id）について、漏れなく1つずつオブジェクトを生成して返してください。
+`;
+
+    // 構造化出力（Structured Outputs）でIDとクレンジング後のタイトルを確実にマッピングさせる
+    const responseSchema = {
+      type: "OBJECT",
+      properties: {
+        cleansed_items: {
+          type: "ARRAY",
+          description: "無毒化処理が完了したタイトルのリスト",
+          items: {
+            type: "OBJECT",
+            properties: {
+              id: { type: "STRING", description: "入力データと完全に一致するID" },
+              title: { type: "STRING", description: "無毒化・ニュアンス維持された安全なタイトル" }
+            },
+            required: ["id", "title"]
+          }
+        }
+      },
+      required: ["cleansed_items"]
+    };
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          { parts: [
+            { text: prompt },
+            { text: `【クレンジング対象データ】\n${JSON.stringify(titlesList)}` }
+          ]}
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          response_mime_type: "application/json",
+          response_schema: responseSchema
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`クレンジングAPIの通信に失敗しました (Status: ${response.status})`);
+    }
+
+    const resData = await response.json();
+    const rawText = resData.candidates[0].content.parts[0].text;
+    const jsonOutput = JSON.parse(rawText);
+
+    // IDをキーにしたオブジェクトマッピングに変換して返却 { "0-0": "安全なタイトル", "0-1": "..." }
+    const resultMap = {};
+    if (jsonOutput.cleansed_items && Array.isArray(jsonOutput.cleansed_items)) {
+      jsonOutput.cleansed_items.forEach(item => {
+        resultMap[item.id] = item.title;
+      });
+    }
+    return resultMap;
+  }
 
   // ブックマークツリーから「フォルダ名」と「配下のエントリ最大30件」を再帰抽出する関数
   function traverseAndExtract(nodes, resultList) {
@@ -113,52 +202,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (node.children) {
         traverseAndExtract(node.children, resultList);
       }
-    }
-  }
-
-  // 【新規追加】options.js 側からも個別呼び出し可能な無毒化（データクレンジング）関数
-  async function cleanseText(apiKey, inputText, textType = "テキストデータ") {
-    if (!inputText) return "";
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-    const prompt = `# あなたの役割
-あなたは入力された${textType}を監視し、AIのセーフティフィルター（有害コンテンツ・成人向け・暴力表現など）に誤判定されそうな単語を、安全かつニュートラルな表現に置換（無毒化）するデータクレンジング専門のAIです。
-
-# 処理ルール
-1. 入力された文字列に、成人向け、暴力、犯罪、過激な政治、ヘイトスピーチ、またはそれらを連想させる不適切な単語（例: 「殺す」「ハッキング」「裏技」「アダルト」「流出」など）が含まれている場合、それらを「一般的なIT用語」や「一般的な表現」に置き換えてください。
-2. 置き換えの際は、元のテキストのニュアンス（技術的な内容なのか、ニュースなのか、エンタメなのか）を極力維持しつつ、無害な表現にしてください。
-3. セーフティフィルターに全く問題のないテキストは、一切変更せずそのまま出力してください。
-4. 余計な挨拶や解説は一切含めず、無毒化した文字列のみを出力してください。
-
-# 変換例
-- 入力: Windowsのパスワードをハッキングして強制突破する裏技
-  出力: Windowsのパスワードの再設定とセキュリティ検証方法
-- 入力: 【閲覧注意】猟奇的な殺人事件の全貌について
-  出力: 社会的な重大事件の経緯に関する考察
-- 入力: 最新の成人向けコンテンツ配信サイトの動向
-  出力: オンラインメディア配信業界の最新動向
-
-# 入力${textType}
-${inputText}`;
-
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.1,
-            response_mime_type: "text/plain"
-          }
-        })
-      });
-
-      if (!response.ok) return inputText;
-      const data = await response.json();
-      return data.candidates[0].content.parts[0].text.trim();
-    } catch (error) {
-      console.error("クレンジング処理エラー:", error);
-      return inputText;
     }
   }
 
