@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "ブックマーク整理 by Gemini",
+  "version": "1.0",
+  "description": "ローカル完結型で安全に動作するAIブックマークマネージャー",
+  "permissions": [
+    "contextMenus",
+    "bookmarks",
+    "tabs",
+    "storage",
+    "notifications" 
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html"
+}
