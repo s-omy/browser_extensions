@@ -191,7 +191,7 @@ async function askGeminiForBestCategory(apiKey, url, cleansedContext, categories
       throw new Error(`API Error: ${response.status} - ${errText}`);
     }
     const data = await response.json();
-    return data.candidates.content.parts.text.trim();
+    return data.candidates[0].content.parts[0].text.trim();
   } catch (error) {
     console.error("Gemini API通信エラー:", error);
     return "未分類";
