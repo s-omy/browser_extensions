@@ -24,12 +24,11 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-// 2.右クリックメニューがクリックされた時のイベントリスナー
+// 2. 右クリックメニューがクリックされた時のイベントリスナー
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const url = info.pageUrl || tab.url;
-  const title = tab.title;
+  const originalTitle = tab.title;
 
-  // 【拡張】APIキーに加えて、同期されたDescriptionデータもストレージから一括取得
   const storage = await chrome.storage.local.get(["gemini_key", "folder_descriptions"]);
   const apiKey = storage.gemini_key;
   const folderDescriptions = storage.folder_descriptions || {};
@@ -43,22 +42,24 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   if (info.menuItemId === "auto-sort") {
     console.log(">> 最適カテゴリの自動判定を開始します...");
-    const bookmarkTree = await chrome.bookmarks.getTree();
     
-    // ブラウザの全フォルダリストを取得
+    // 【新規】実処理の前にタイトルを無毒化クレンジング
+    console.log(`>> 元のタイトル: "${originalTitle}" を検証・クレンジング中...`);
+    const cleansedTitle = await cleanseText(apiKey, originalTitle, "Webページのタイトル");
+    console.log(`>> クレンジング後: "${cleansedTitle}"`);
+
+    const bookmarkTree = await chrome.bookmarks.getTree();
     const existingFolders = extractFolders(bookmarkTree);
 
-    // 【新規】既存フォルダと、Pythonから同期したDescription（説明文）をマッピングした構造を作る
     const categoriesWithContext = existingFolders.map(folderName => {
       return {
         folder_name: folderName,
-        // 同期データにDescriptionがあれば適用、なければ空文字
         description: folderDescriptions[folderName] || "説明なし（新規フォルダまたは未解析）"
       };
     });
 
-    // マッピングされた高コンテキストなデータをAIに渡す
-    targetFolder = await askGeminiForBestCategory(apiKey, url, title, categoriesWithContext);
+    // 無毒化されたタイトルを実処理に投入
+    targetFolder = await askGeminiForBestCategory(apiKey, url, cleansedTitle, categoriesWithContext);
   } else {
     const folderMapping = {
       "unclassified": "未分類",
@@ -69,16 +70,62 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     targetFolder = folderMapping[info.menuItemId];
   }
 
-  // ブックマークを登録
   console.log(`>> '${targetFolder}' フォルダにブックマークを保存します...`);
-  await createBookmarkInFolder(targetFolder, title, url);
+  await createBookmarkInFolder(targetFolder, originalTitle, url); // 保存する際は元のきれいなタイトルで登録
 
   showNotification("ブックマーク保存完了", `「${targetFolder}」に登録しました。`);
 });
 
+// 【新規追加】タイトルやmetaタグなど、あらゆるテキストを無毒化（ニュートラル化）する独立したクレンジング関数
+async function cleanseText(apiKey, inputText, textType = "テキストデータ") {
+  if (!inputText) return "";
+  const endpoint = `https://googleapis.com{apiKey}`;
+
+  const prompt = `# あなたの役割
+あなたは入力された${textType}を監視し、AIのセーフティフィルター（有害コンテンツ・成人向け・暴力表現など）に誤判定されそうな単語を、安全かつニュートラルな表現に置換（無毒化）するデータクレンジング専門のAIです。
+
+# 処理ルール
+1. 入力された文字列に、成人向け、暴力、犯罪、過激な政治、ヘイトスピーチ、またはそれらを連想させる不適切な単語（例: 「殺す」「ハッキング」「裏技」「アダルト」「流出」など）が含まれている場合、それらを「一般的なIT用語」や「一般的な表現」に置き換えてください。
+2. 置き換えの際は、元のテキストのニュアンス（技術的な内容なのか、ニュースなのか、エンタメなのか）を極力維持しつつ、無害な表現にしてください。
+3. セーフティフィルターに全く問題のないテキストは、一切変更せずそのまま出力してください。
+4. 余計な挨拶や解説は一切含めず、無毒化した文字列のみを出力してください。
+
+# 変換例
+- 入力: Windowsのパスワードをハッキングして強制突破する裏技
+  出力: Windowsのパスワードの再設定とセキュリティ検証方法
+- 入力: 【閲覧注意】猟奇的な殺人事件の全貌について
+  出力: 社会的な重大事件の経緯に関する考察
+- 入力: 最新の成人向けコンテンツ配信サイトの動向
+  出力: オンラインメディア配信業界の最新動向
+
+# 入力${textType}
+${inputText}`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          response_mime_type: "text/plain"
+        }
+      })
+    });
+
+    if (!response.ok) return inputText; // クレンジングAPI自体がエラーになった場合は元の文字列でフォールバック
+    const data = await response.json();
+    return data.candidates[0].content.parts[0].text.trim();
+  } catch (error) {
+    console.error("クレンジング処理エラー:", error);
+    return inputText;
+  }
+}
+
 // プロンプトへDescriptionコンテキストの動的埋め込み
 async function askGeminiForBestCategory(apiKey, url, title, categoriesWithContext) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+  const endpoint = `https://googleapis.com{apiKey}`;
   
   const prompt = `
   ユーザーが現在ブラウザで開いているWEBページを、提示された【カテゴリ候補リスト（説明文付き）】の中から最も適切なフォルダに分類し、決定したフォルダ名（文字列）のみを返してください。
@@ -89,14 +136,13 @@ async function askGeminiForBestCategory(apiKey, url, title, categoriesWithContex
   ・どれにも当てはまらない、または迷う場合は「未分類」を返してください。
 
   【WEBページ情報】
-  ・ページタイトル: ${title}
+  ・ページタイトル（データクレンジング済）: ${title}
   ・URL: ${url}
 
   【カテゴリ候補リスト（説明文付きコンテキスト）】
   ${JSON.stringify(categoriesWithContext)}
   `;
 
-  // （以下、fetch通信処理・エラーハンドリング・フォールバックは既存のままで問題ありません）
   try {
     const response = await fetch(endpoint, {
       method: "POST",
@@ -121,33 +167,25 @@ async function askGeminiForBestCategory(apiKey, url, title, categoriesWithContex
   }
 }
 
-// 4. 指定された名前のフォルダを探して、その中にブックマークを作成する関数
+// 指定された名前のフォルダを探して、その中にブックマークを作成する関数
 async function createBookmarkInFolder(folderName, title, url) {
-  // 同名のフォルダがあるか検索
   const nodes = await chrome.bookmarks.search({ title: folderName });
   let folderId;
-
-  // フォルダが見つかり、かつそれが「ブックマークエントリ」ではなく「フォルダ」であることを確認
   const folderNode = nodes.find(node => !node.url);
 
   if (folderNode) {
     folderId = folderNode.id;
   } else {
-    // 存在しない場合は「ブックマークバー（通常はID '1'）」の配下に新規作成
     const newFolder = await chrome.bookmarks.create({ parentId: "1", title: folderName });
     folderId = newFolder.id;
   }
-
-  // ブックマークを登録
   await chrome.bookmarks.create({ parentId: folderId, title: title, url: url });
-  console.log(`>> '${folderName}' フォルダにブックマークを保存しました。`);
 }
 
-// 5. ブックマークツリーからフォルダ名だけを再帰的に抽出するヘルパー
+// ブックマークツリーからフォルダ名だけを再帰的に抽出するヘルパー
 function extractFolders(nodes, folderList = ["開発・技術", "趣味・娯楽", "生活", "未分類"]) {
   for (const node of nodes) {
     if (!node.url && node.title) {
-      // 重複を防ぎつつリストに追加
       if (!folderList.includes(node.title)) {
         folderList.push(node.title);
       }
@@ -158,6 +196,7 @@ function extractFolders(nodes, folderList = ["開発・技術", "趣味・娯楽
   }
   return folderList;
 }
+
 // 通知ポップアップを表示
 function showNotification(title, message) {
   chrome.notifications.create({
