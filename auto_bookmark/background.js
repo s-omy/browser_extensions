@@ -79,7 +79,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // 【新規追加】タイトルやmetaタグなど、あらゆるテキストを無毒化（ニュートラル化）する独立したクレンジング関数
 async function cleanseText(apiKey, inputText, textType = "テキストデータ") {
   if (!inputText) return "";
-  const endpoint = `https://googleapis.com{apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
   const prompt = `# あなたの役割
 あなたは入力された${textType}を監視し、AIのセーフティフィルター（有害コンテンツ・成人向け・暴力表現など）に誤判定されそうな単語を、安全かつニュートラルな表現に置換（無毒化）するデータクレンジング専門のAIです。
@@ -125,7 +125,7 @@ ${inputText}`;
 
 // プロンプトへDescriptionコンテキストの動的埋め込み
 async function askGeminiForBestCategory(apiKey, url, title, categoriesWithContext) {
-  const endpoint = `https://googleapis.com{apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
   
   const prompt = `
   ユーザーが現在ブラウザで開いているWEBページを、提示された【カテゴリ候補リスト（説明文付き）】の中から最も適切なフォルダに分類し、決定したフォルダ名（文字列）のみを返してください。

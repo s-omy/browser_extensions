@@ -119,8 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 【新規追加】options.js 側からも個別呼び出し可能な無毒化（データクレンジング）関数
   async function cleanseText(apiKey, inputText, textType = "テキストデータ") {
     if (!inputText) return "";
-    const endpoint = `https://googleapis.com{apiKey}`;
-
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
     const prompt = `# あなたの役割
 あなたは入力された${textType}を監視し、AIのセーフティフィルター（有害コンテンツ・成人向け・暴力表現など）に誤判定されそうな単語を、安全かつニュートラルな表現に置換（無毒化）するデータクレンジング専門のAIです。
 
@@ -165,7 +164,7 @@ ${inputText}`;
 
   // gemini-3.6-flash を呼び出して構造化JSONを取得する関数
   async function generateDescriptionsViaGemini(apiKey, parsedData) {
-    const endpoint = `https://googleapis.com{apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
     const prompt = `
     あなたは優秀なデータアナリストです。
