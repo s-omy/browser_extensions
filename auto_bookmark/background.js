@@ -42,12 +42,32 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   if (info.menuItemId === "auto-sort") {
     console.log(">> 最適カテゴリの自動判定を開始します...");
-    
-    // 【新規】実処理の前にタイトルを無毒化クレンジング
-    console.log(`>> 元のタイトル: "${originalTitle}" を検証・クレンジング中...`);
-    const cleansedTitle = await cleanseText(apiKey, originalTitle, "Webページのタイトル");
-    console.log(`>> クレンジング後: "${cleansedTitle}"`);
 
+    // 【新規】タブの裏側から meta タグ情報 (description, keywords) を動的取得
+    let pageMetaText = "取得失敗または無し";
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: getPageMetaData // 下部で定義しているインページ抽出関数を実行
+      });
+      if (results && results[0] && results[0].result) {
+        pageMetaText = results[0].result;
+      }
+    } catch (scriptError) {
+      console.warn("ページメタデータの取得をスキップしました (制限のあるページ、または未読み込みの可能性):", scriptError);
+    }
+
+    console.log(`>> 抽出されたメタ情報: "${pageMetaText}"`);
+
+    // タイトルとメタ情報を合算したコンテキストを構築
+    const combinedInputText = `タイトル: ${originalTitle}\n概要情報: ${pageMetaText}`;
+
+    // 【無毒化】合算されたコンテキストを実処理の前に安全にサニタイズ
+    console.log(">> ページコンテキストの無毒化クレンジング中...");
+    const cleansedContext = await cleanseText(apiKey, combinedInputText, "Webページのコンテキスト（タイトル・メタデータ）");
+    console.log(`>> クレンジング完了結果:\n${cleansedContext}`);
+
+    // ブラウザの全フォルダリストを取得
     const bookmarkTree = await chrome.bookmarks.getTree();
     const existingFolders = extractFolders(bookmarkTree);
 
@@ -58,8 +78,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       };
     });
 
-    // 無毒化されたタイトルを実処理に投入
-    targetFolder = await askGeminiForBestCategory(apiKey, url, cleansedTitle, categoriesWithContext);
+    // 無毒化された高密度コンテキスト情報を元にAI判定へ
+    targetFolder = await askGeminiForBestCategory(apiKey, url, cleansedContext, categoriesWithContext);
   } else {
     const folderMapping = {
       "unclassified": "未分類",
@@ -71,12 +91,23 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   console.log(`>> '${targetFolder}' フォルダにブックマークを保存します...`);
-  await createBookmarkInFolder(targetFolder, originalTitle, url); // 保存する際は元のきれいなタイトルで登録
+  await createBookmarkInFolder(targetFolder, originalTitle, url); // 保存時は本来のタイトルで登録
 
   showNotification("ブックマーク保存完了", `「${targetFolder}」に登録しました。`);
 });
 
-// 【新規追加】タイトルやmetaタグなど、あらゆるテキストを無毒化（ニュートラル化）する独立したクレンジング関数
+// 【新規追加】アクティブなWEBページ（DOM内）で実行され、metaタグを抽出する軽量関数
+function getPageMetaData() {
+  const descTag = document.querySelector('meta[name="description"]') || document.querySelector('meta[property="og:description"]');
+  const keyTag = document.querySelector('meta[name="keywords"]');
+  
+  const desc = descTag ? descTag.getAttribute('content') : '';
+  const keywords = keyTag ? keyTag.getAttribute('content') : '';
+  
+  return `[Description]: ${desc || '無し'} | [Keywords]: ${keywords || '無し'}`;
+}
+
+// あらゆるテキストを無毒化（ニュートラル化）する独立したクレンジング関数
 async function cleanseText(apiKey, inputText, textType = "テキストデータ") {
   if (!inputText) return "";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
@@ -94,7 +125,7 @@ async function cleanseText(apiKey, inputText, textType = "テキストデータ"
 - 入力: Windowsのパスワードをハッキングして強制突破する裏技
   出力: Windowsのパスワードの再設定とセキュリティ検証方法
 - 入力: 【閲覧注意】猟奇的な殺人事件の全貌について
-  出力: 社会的な重大事件の経緯に関する考察
+  出力: 社会的な重大事件の経経に関する考察
 - 入力: 最新の成人向けコンテンツ配信サイトの動向
   出力: オンラインメディア配信業界の最新動向
 
@@ -114,9 +145,9 @@ ${inputText}`;
       })
     });
 
-    if (!response.ok) return inputText; // クレンジングAPI自体がエラーになった場合は元の文字列でフォールバック
+    if (!response.ok) return inputText;
     const data = await response.json();
-    return data.candidates[0].content.parts[0].text.trim();
+    return data.candidates.content.parts.text.trim();
   } catch (error) {
     console.error("クレンジング処理エラー:", error);
     return inputText;
@@ -124,7 +155,7 @@ ${inputText}`;
 }
 
 // プロンプトへDescriptionコンテキストの動的埋め込み
-async function askGeminiForBestCategory(apiKey, url, title, categoriesWithContext) {
+async function askGeminiForBestCategory(apiKey, url, cleansedContext, categoriesWithContext) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
   
   const prompt = `
@@ -132,11 +163,11 @@ async function askGeminiForBestCategory(apiKey, url, title, categoriesWithContex
 
   【ルール】
   ・返却するテキストは、決定したフォルダ名のみ（例: "開発・技術"）とし、バッククォートや追加の説明文、マークダウン、改行は一切含めないでください。
-  ・各フォルダの「description（説明文）」を深く読み込み、ページのタイトルやドメインの親和性が最も高いものを選択してください。
+  ・各フォルダの「description（説明文）」を深く読み込み、提供されたWEBページのコンテキスト情報との親和性が最も高いものを選択してください。
   ・どれにも当てはまらない、または迷う場合は「未分類」を返してください。
 
-  【WEBページ情報】
-  ・ページタイトル（データクレンジング済）: ${title}
+  【WEBページ情報（データクレンジング済）】
+  ${cleansedContext}
   ・URL: ${url}
 
   【カテゴリ候補リスト（説明文付きコンテキスト）】
