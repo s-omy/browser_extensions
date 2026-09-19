@@ -4,38 +4,96 @@
   <meta charset="UTF-8">
   <title>Neat AI Bookmark 設定</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 600px; }
-    .field { margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
-    label { display: block; font-weight: bold; margin-bottom: 5px; }
-    input[type="password"] { width: 100%; padding: 8px; box-sizing: border-box; }
-    button { padding: 8px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-    button:disabled { background: #ccc; cursor: not-allowed; }
-    button.action-btn { background: #28a745; font-size: 14px; font-weight: bold; }
-    #status, #sync-status { margin-top: 10px; font-weight: bold; }
-    .desc-preview { background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 12px; max-height: 250px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; }
-    .loader { display: inline-block; margin-left: 10px; color: #6c757d; }
+    body { font-family: sans-serif; padding: 20px; max-width: 900px; margin: 0 auto; color: #333; }
+    .field { margin-bottom: 25px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+    label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 15px; }
+    input[type="password"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 10px 20px; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    button:disabled { background: #ccc !important; cursor: not-allowed; }
+    
+    .btn-primary { background: #007bff; }
+    .btn-success { background: #28a745; }
+    .btn-warning { background: #ffc107; color: #212529; }
+    .btn-danger { background: #dc3545; }
+
+    .loader { display: inline-block; margin-left: 10px; color: #6c757d; font-size: 14px; font-weight: bold; }
+    #sync-status, #relocate-status { margin-top: 10px; font-weight: bold; }
+    
+    .desc-preview { background: #f8f9fa; padding: 12px; border-radius: 4px; font-size: 13px; max-height: 180px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; border: 1px solid #ddd; }
+
+    /* --- Diff Preview スタイル --- */
+    .diff-container { margin-top: 20px; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; background: #fff; }
+    .diff-header { background: #f6f8fa; padding: 10px 15px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+    .diff-view-selector button { padding: 4px 10px; font-size: 12px; background: #fff; color: #57606a; border: 1px solid #d0d7de; border-radius: 4px; margin-left: 5px; }
+    .diff-view-selector button.active { background: #0969da; color: #fff; border-color: #0969da; }
+    
+    .diff-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    .diff-table th, .diff-table td { padding: 8px 12px; border-bottom: 1px solid #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .diff-table th { background: #f6f8fa; text-align: left; font-weight: bold; color: #57606a; }
+    
+    .diff-row-deleted { background-color: #ffebe9; }
+    .diff-row-added { background-color: #e6ffec; }
+    .diff-row-unchanged { background-color: #fff; color: #6a737d; }
+    
+    .badge { display: inline-block; padding: 2px 6px; font-size: 11px; font-weight: bold; border-radius: 10px; color: white; margin-left: 5px; }
+    .badge-score { background-color: #6f42c1; }
+    
+    .action-cell { width: 70px; text-align: center; }
+    .checkbox-apply { width: 18px; height: 18px; cursor: pointer; }
+    
+    .diff-item-header { background: #f1f8ff; font-weight: bold; border-top: 1px solid #c8e1ff; border-bottom: 1px solid #c8e1ff; }
+
+    /* 【新規追加】AIのレンダリング崩れを防ぐためのCSS隔離クラス */
+    .diff-bookmark-link { text-decoration: none; color: #0969da; font-weight: bold; }
+    .diff-reason-text { font-size: 11px; color: #57606a; font-weight: normal; margin-top: 2px; }
+    .diff-sub-info { font-size: 11px; margin-top: 2px; }
+    .diff-pad-left { padding-left: 24px; }
+    .color-del { color: #cf222e; }
+    .color-add { color: #1a7f37; }
   </style>
 </head>
 <body>
   <h2>Neat AI Bookmark Manager 設定</h2>
   
-  <!-- APIキー設定セクション -->
   <div class="field">
     <label for="api-key">Gemini API キー (Pay-per-request):</label>
     <input type="password" id="api-key" placeholder="APIキーを入力">
-    <button id="save-btn" style="margin-top: 10px;">キーを保存</button>
+    <button id="save-btn" class="btn-primary" style="margin-top: 10px;">キーを保存</button>
     <div id="status"></div>
   </div>
 
-  <!-- 拡張機能内で完結させるAI解析セクション -->
   <div class="field">
-    <label>フォルダコンテキストの自動解析・同期:</label>
-    <p style="font-size: 13px; color: #6c757d; margin-top: 0;">現在のブラウザのブックマークフォルダと配下のページ（各最大10件）を直接抽出し、GeminiでDescriptionを生成・更新します。</p>
-    <button id="analyze-btn" class="action-btn">🔄 AIで全フォルダを解析・更新する</button>
+    <label>① フォルダコンテキストの自動解析・同期:</label>
+    <p style="font-size: 13px; color: #6c757d; margin-top: 0;">現在のフォルダ階層構造のDescriptionを自動生成・記憶させ、AIの分類精度を最大化します。</p>
+    <button id="analyze-btn" class="btn-success">🔄 AIで全フォルダを解析・更新する</button>
     <span id="loading-spinner" class="loader"></span>
     <div id="sync-status"></div>
-    <h4 style="margin-bottom: 5px;">現在の同期済みフォルダ数: <span id="category-count">0</span></h4>
+    <h4 style="margin-bottom: 5px;">記憶されたフォルダ数: <span id="category-count">0</span></h4>
     <div id="desc-list" class="desc-preview">同期されたデータはありません</div>
+  </div>
+
+  <div class="field">
+    <label>② ブックマークの再カテゴライズ (一括整理・シミュレーション):</label>
+    <p style="font-size: 13px; color: #6c757d; margin-top: 0;">全ブックマークの適合率(0〜100%)を測定し、最適な配置への変更差分をプレビューします（[アンタッチャブル]フォルダは保護されます）。</p>
+    <button id="relocate-btn" class="btn-warning">🔍 再カテゴライズをシミュレーションする</button>
+    <span id="relocate-spinner" class="loader"></span>
+    <div id="relocate-status"></div>
+
+    <div id="diff-section" style="display: none; margin-top: 20px;">
+      <div class="diff-header">
+        <span style="font-weight: bold; color: #24292f;">📋 再配置の変更差分プレビュー</span>
+        <div class="diff-view-selector">
+          <button id="btn-view-unified" class="active">Unified (統合)</button>
+          <button id="btn-view-split">Split (分割)</button>
+        </div>
+      </div>
+      
+      <div id="diff-table-container"></div>
+      
+      <div style="margin-top: 15px; text-align: right;">
+        <button id="apply-relocate-btn" class="btn-danger" style="font-size: 15px; padding: 12px 24px;">選択した再カテゴライズを実適用する</button>
+      </div>
+    </div>
   </div>
 
   <script src="options.js"></script>
