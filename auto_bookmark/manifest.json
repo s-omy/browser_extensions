@@ -1,21 +1,40 @@
 {
   "manifest_version": 3,
   "name": "ブックマーク整理 by Gemini",
-  "version": "1.0",
-  "description": "ローカル完結型で安全に動作するAIブックマークマネージャー",
+  "version": "1.2.0",
+  "icons": {
+    "128": "icon.png"
+  },
+  "description": "AI（Gemini、またはLiteLLM Proxy等のOpenAI互換エンドポイント）でブックマークを最適なフォルダへ自動で振り分けます。ページのURL・タイトル等は、設定したAIプロバイダへ送信されます。",
   "permissions": [
-    "contextMenus",
+    "activeTab",
     "bookmarks",
-    "tabs",
-    "storage",
+    "contextMenus",
     "notifications",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*"
   ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "このページを最適なフォルダへブックマーク"
+  },
+  "commands": {
+    "auto-sort-current-tab": {
+      "suggested_key": {
+        "default": "Alt+Shift+B"
+      },
+      "description": "現在のページを最適なフォルダへブックマーク"
+    }
+  },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "options_page": "options.html"
 }
