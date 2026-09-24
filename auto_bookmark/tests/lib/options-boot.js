@@ -19,7 +19,7 @@ export const text = id => $(id).textContent;
  */
 export async function boot(base, { tree, storage = {}, handler, confirmAnswer = true, permissionsGranted = true } = {}) {
   await loadOptionsDom();
-  const env = installChrome({ tree, storage: { storage_version: 2, ...storage }, permissionsGranted });
+  const env = installChrome({ tree, storage: { storage_version: 3, ...storage }, permissionsGranted });
   const requests = mockFetch(handler || (() => okJson({})));
   const confirms = [];
   window.confirm = message => {

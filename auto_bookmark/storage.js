@@ -3,6 +3,7 @@
 import { collectFolderInfos } from "./bookmarks.js";
 import { normalizePrivacySettings } from "./privacy.js";
 import { DEFAULT_PROVIDER } from "./gemini.js";
+import { normalizeKeywords } from "./keywords.js";
 
 /**
  * 保存データの一覧（すべて chrome.storage.local）
@@ -16,9 +17,12 @@ import { DEFAULT_PROVIDER } from "./gemini.js";
  * quick_folders                string[] 右クリックメニューに載せるクイック保存先のフォルダID
  * folder_descriptions_by_id   object   { フォルダID: AI生成の説明文 }
  * folder_meta_tree            object[] { folder_id, folder_name, hierarchical_categories, is_quick_access,
- *                                        is_untouchable, entry_count, analyzed_entry_count }
- * page_knowledge_base         object   { URL: { subject, summary, description, keyword,
+ *                                        is_untouchable, entry_count, analyzed_entry_count, analyzed_name, analyzed_path }
+ *                                      analyzed_* は説明文を生成した時点の値（改名・移動の検出に使う）。
+ *                                      それ以外の名前・パス・属性・件数は、整合処理（reconcile.js）が現在の値へ更新する
+ * page_knowledge_base         object   { URL: { subject, summary, description, keywords,
  *                                        hierarchical_categories, last_updated_at, source } }
+ *                                      keywords: string[]（1語=1タグ。区切り文字・空白を含まない。keywords.js で正規化）
  *                                      source: "ai_estimate"（URLとタイトルからのAI推定）| "page_meta"（ページのmetaタグ）
  * relocation_undo             object   { applied_at, moves: [{ id, title, fromParentId, fromIndex, toParentId }] }
  * gemini_log / gemini_usage   （gemini.js が管理する動作ログと累計トークン。provider・model を含む）
@@ -41,7 +45,7 @@ export const KEYS = Object.freeze({
   LEGACY_FOLDER_DESCRIPTIONS: "folder_descriptions"
 });
 
-export const STORAGE_VERSION = 2;
+export const STORAGE_VERSION = 3;
 
 /**
  * 現在のプロバイダ設定（API呼び出しに使う接続情報）をまとめて返す。
@@ -86,33 +90,63 @@ export async function getKnowledgeBase() {
 
 /**
  * 旧形式のデータを現行形式へ移行する（何度呼んでも安全）。
- * 旧: 説明文がフォルダ名キー → 新: フォルダIDキー。
- * 同名フォルダが複数あって対応を決められないものは移行せず、次回のフォルダ解析で再生成される。
+ *   v1 → v2: 説明文がフォルダ名キー → フォルダIDキー。同名フォルダが複数あって対応を決められないものは移行せず、
+ *            次回のフォルダ解析で再生成される。
+ *   v2 → v3: ページ知識のキーワードが区切り付きの文字列（keyword）→ 語の配列（keywords）。
+ * 変換の途中で失敗した場合は、何も書き込まずに警告だけを残す（バージョンも上げないので、次回の起動で再試行される）。
  * @returns {Promise<boolean>} 移行を実施したか
  */
 export async function migrateLegacyStorage() {
-  const stored = await chrome.storage.local.get([KEYS.VERSION, KEYS.LEGACY_FOLDER_DESCRIPTIONS, KEYS.FOLDER_DESCRIPTIONS]);
+  const stored = await chrome.storage.local.get([KEYS.VERSION, KEYS.LEGACY_FOLDER_DESCRIPTIONS, KEYS.FOLDER_DESCRIPTIONS, KEYS.KNOWLEDGE_BASE]);
   if ((stored[KEYS.VERSION] || 1) >= STORAGE_VERSION) return false;
 
   const legacy = stored[KEYS.LEGACY_FOLDER_DESCRIPTIONS];
   const update = { [KEYS.VERSION]: STORAGE_VERSION };
 
-  if (legacy && typeof legacy === "object") {
-    const idsByName = new Map();
-    for (const folder of collectFolderInfos(await chrome.bookmarks.getTree())) {
-      if (!idsByName.has(folder.name)) idsByName.set(folder.name, []);
-      idsByName.get(folder.name).push(folder.id);
+  try {
+    const convertedKnowledgeBase = convertLegacyKeywords(stored[KEYS.KNOWLEDGE_BASE]);
+    if (convertedKnowledgeBase) update[KEYS.KNOWLEDGE_BASE] = convertedKnowledgeBase;
+
+    if (legacy && typeof legacy === "object") {
+      const idsByName = new Map();
+      for (const folder of collectFolderInfos(await chrome.bookmarks.getTree())) {
+        if (!idsByName.has(folder.name)) idsByName.set(folder.name, []);
+        idsByName.get(folder.name).push(folder.id);
+      }
+      const migrated = {};
+      for (const [name, description] of Object.entries(legacy)) {
+        const ids = idsByName.get(name);
+        if (ids && ids.length === 1) migrated[ids[0]] = description;
+      }
+      // 新形式で既に保存されている説明文を優先する
+      update[KEYS.FOLDER_DESCRIPTIONS] = { ...migrated, ...(stored[KEYS.FOLDER_DESCRIPTIONS] || {}) };
     }
-    const migrated = {};
-    for (const [name, description] of Object.entries(legacy)) {
-      const ids = idsByName.get(name);
-      if (ids && ids.length === 1) migrated[ids[0]] = description;
-    }
-    // 新形式で既に保存されている説明文を優先する
-    update[KEYS.FOLDER_DESCRIPTIONS] = { ...migrated, ...(stored[KEYS.FOLDER_DESCRIPTIONS] || {}) };
+  } catch (error) {
+    console.warn("データの移行に失敗しました（既存のデータは変更していません。次回の起動で再試行します）:", error);
+    return false;
   }
 
   await chrome.storage.local.set(update);
   if (legacy !== undefined) await chrome.storage.local.remove(KEYS.LEGACY_FOLDER_DESCRIPTIONS);
   return true;
+}
+
+/**
+ * ページ知識の旧キーワード（keyword: 区切り付きの文字列）を、語の配列（keywords）へ変換した新しいオブジェクトを返す。
+ * 変換が必要な項目が無ければ undefined。キーワード以外の項目は変更しない。
+ */
+function convertLegacyKeywords(knowledgeBase) {
+  if (!knowledgeBase || typeof knowledgeBase !== "object") return undefined;
+  let changed = false;
+  const converted = {};
+  for (const [url, entry] of Object.entries(knowledgeBase)) {
+    if (entry && typeof entry === "object" && !Array.isArray(entry.keywords)) {
+      const { keyword, ...rest } = entry;
+      converted[url] = { ...rest, keywords: normalizeKeywords(keyword) };
+      changed = true;
+    } else {
+      converted[url] = entry;
+    }
+  }
+  return changed ? converted : undefined;
 }

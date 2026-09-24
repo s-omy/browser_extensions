@@ -59,6 +59,7 @@ button:disabled { background: #ccc !important; cursor: not-allowed; }
 .attr-badge { display: inline-block; border-radius: 3px; padding: 1px 4px; font-size: 10px; font-weight: bold; border: 1px solid; }
 .attr-badge-bar { background: #e1f5fe; color: #0288d1; border-color: #b3e5fc; }
 .attr-badge-lock { background: #ffebee; color: #c62828; border-color: #ffcdd2; }
+.attr-badge-warn { background: #fff3e0; color: #e65100; border-color: #ffcc80; }
 .attr-badge-source { background: #f1f3f4; color: #57606a; border-color: #d0d7de; font-weight: normal; }
 
 .diff-section-block { margin-top: 20px; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; background: #fff; }

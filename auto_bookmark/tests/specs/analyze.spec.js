@@ -73,6 +73,8 @@ const ctx = lazy(async () => {
     bigExcludedDomainSent: JSON.stringify(bigReq).includes("secret.example"),
     f1AnalyzedCount: meta.find(m => m.folder_id === "101").analyzed_entry_count,
     f7AnalyzedCount: meta.find(m => m.folder_id === "107").analyzed_entry_count,
+    f1AnalyzedAt: { name: meta.find(m => m.folder_id === "101").analyzed_name, path: meta.find(m => m.folder_id === "101").analyzed_path },
+    f7AnalyzedAt: { name: meta.find(m => m.folder_id === "107").analyzed_name, path: meta.find(m => m.folder_id === "107").analyzed_path },
     status: text("analyze-status"),
     staleInfoAfter: text("stale-info")
   };
@@ -179,6 +181,16 @@ describe("フォルダ解析: 解析時の件数を記録し、削除済みフ�
   test("説明文を生成したフォルダには、そのときの件数を記録する", async () => {
     const c = await ctx();
     assertEqual(c.full.f1AnalyzedCount, 2);
+  });
+
+  test("説明文を生成したフォルダには、そのときの名前と階層パス（analyzed_name / analyzed_path）も記録する", async () => {
+    const c = await ctx();
+    assertEqual(c.full.f1AnalyzedAt, { name: "F1", path: "F1" });
+  });
+
+  test("失敗したフォルダは、名前・階層パスも更新しない（初回なので記録なし）", async () => {
+    const c = await ctx();
+    assertEqual(c.full.f7AnalyzedAt, { name: undefined, path: undefined });
   });
 
   test("失敗したフォルダは、件数を更新しない（初回なので記録なし）", async () => {

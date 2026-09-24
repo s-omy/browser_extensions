@@ -79,7 +79,8 @@ const ctx = lazy(async () => {
     schemaEnumHasNoProtected: !okRequest.schema.properties.folder_id.enum.some(id => id === "10" || id === "11"),
     promptHasNoProtected: !/"(10|11)"/.test(okRequest.texts.split("カテゴリ候補")[1]),
     keyInHeaderNotUrl: okRequest.headers["x-goog-api-key"] === "K" && !okRequest.url.includes("K="),
-    kbSource: env.storage.page_knowledge_base?.["https://ok.example/a?token=SECRET"]?.source
+    kbSource: env.storage.page_knowledge_base?.["https://ok.example/a?token=SECRET"]?.source,
+    kbKeywords: env.storage.page_knowledge_base?.["https://ok.example/a?token=SECRET"]?.keywords
   };
 
   // ---- 通知ボタン ----
@@ -221,6 +222,7 @@ describe("background.js: 自動振り分け（正常系）", () => {
   test("読み取れたページmetaを、ナレッジとして保存する（source: page_meta）", async () => {
     const s = await ctx();
     assertEqual(s.autoOkDetail.kbSource, "page_meta");
+    assertEqual(s.autoOkDetail.kbKeywords, ["js", "node"], "ページのキーワード情報は、語の配列として保存する");
   });
 });
 

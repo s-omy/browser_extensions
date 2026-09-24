@@ -15,7 +15,7 @@ ai-tasks     プロンプト・応答スキーマ・応答の検証
    ↓
 gemini       callGemini（リトライ・エラー分類・ログ）→ openai-compatible.js（アダプター）
 
-基盤（どの層からも参照可）: config.js / storage.js / bookmarks.js / privacy.js
+基盤（どの層からも参照可）: config.js / storage.js / bookmarks.js / privacy.js / keywords.js
   ※ background.js は workflow 層を経由せず ai-tasks を直接使ってよい（単発の処理のため）。
   ※ ui-* は、gemini.js のエラー文言・定数など読み取り専用の部品を直接参照してよい。
 ```

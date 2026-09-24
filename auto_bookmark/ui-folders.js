@@ -1,15 +1,17 @@
 // ① フォルダ解析: ボタン操作・進捗表示・フォルダ一覧の描画
 
+import { listFolderStates } from "./bookmarks.js";
 import { analyzeFolders, findStaleFolders } from "./folder-analysis.js";
 import { describeGeminiError } from "./gemini.js";
+import { operationLock } from "./reconcile.js";
 import { getLlmConnection, getFolderDescriptions, getFolderMeta, getPrivacySettings } from "./storage.js";
 import { TONE, h, setStatus } from "./ui-common.js";
 
 const MAX_FAILED_NAMES_SHOWN = 3;
 const PROTECTED_DESCRIPTION = "保護フォルダのため、中身をAIに送信せず、解析しません。";
 
-/** @param {{onApiCall: () => void}} hooks */
-export function initFolders({ onApiCall }) {
+/** @param {{onApiCall: () => void, reconcile?: () => Promise<unknown>}} hooks reconcile … AIを呼ぶ前に、保存データを現在のブックマークへ整合させる */
+export function initFolders({ onApiCall, reconcile = async () => {} }) {
   const analyzeBtn = document.getElementById("analyze-btn");
   const analyzeStaleBtn = document.getElementById("analyze-stale-btn");
   const progressText = document.getElementById("analyze-progress-text");
@@ -27,7 +29,9 @@ export function initFolders({ onApiCall }) {
       return;
     }
 
+    await reconcile(); // AIを呼ぶ前に、削除・改名・移動を保存データへ反映する
     try {
+      operationLock.enter("analyze"); // 実行中は整合処理を始めない（保存内容の競合を避ける）
       analyzeBtn.disabled = true;
       analyzeStaleBtn.disabled = true;
       setStatus(statusDiv, "");
@@ -49,6 +53,7 @@ export function initFolders({ onApiCall }) {
       console.error(error);
       setStatus(statusDiv, "エラー: 解析エラー: " + error.message, TONE.ERROR);
     } finally {
+      operationLock.leave("analyze");
       analyzeBtn.disabled = false;
       progressText.textContent = "";
       progressPercent.textContent = "";
@@ -78,11 +83,12 @@ export function initFolders({ onApiCall }) {
 
   analyzeBtn.addEventListener("click", () => runAnalysis(null));
   analyzeStaleBtn.addEventListener("click", async () => {
+    await reconcile();
     const stale = findStaleFolders(await chrome.bookmarks.getTree(), await getFolderDescriptions(), await getFolderMeta());
     await runAnalysis(new Set(stale.map(s => s.folderId)));
   });
 
-  // 再解析が必要なフォルダ（説明文がない・ブックマーク数が大きく変わった）を、ローカルの比較だけで数える
+  // 再解析が必要なフォルダ（説明文がない・名称や場所が変わった・ブックマーク数が大きく変わった）を、ローカルの比較だけで数える
   async function refreshStaleInfo() {
     const stale = findStaleFolders(await chrome.bookmarks.getTree(), await getFolderDescriptions(), await getFolderMeta());
     analyzeStaleBtn.disabled = stale.length === 0;
@@ -90,34 +96,44 @@ export function initFolders({ onApiCall }) {
       staleInfo.textContent = "すべてのフォルダが最新の状態で解析されています。";
       return;
     }
-    const unanalyzed = stale.filter(s => s.reason === "未解析").length;
-    staleInfo.textContent = "再解析が必要なフォルダ: " + stale.length + " 件（未解析 " + unanalyzed + " 件 / ブックマーク数が変化 " +
-      (stale.length - unanalyzed) + " 件）。新しく作ったフォルダは、解析するまで「説明なし」としてAIに渡されます。";
+    const countOf = reason => stale.filter(s => s.reason === reason).length;
+    staleInfo.textContent = "再解析が必要なフォルダ: " + stale.length + " 件（未解析 " + countOf("未解析") + " 件 / ブックマーク数が変化 " + countOf("変更") +
+      " 件 / 名称変更 " + countOf("名称変更") + " 件 / 場所の変更 " + countOf("場所の変更") + " 件）。新しく作ったフォルダは、解析するまで「説明なし」としてAIに渡されます。";
   }
 
   async function renderCategoryTable() {
+    const tree = await chrome.bookmarks.getTree();
     const [descriptions, metaList] = [await getFolderDescriptions(), await getFolderMeta()];
-    categoryCount.textContent = String(metaList.length);
+    // 一覧は現在のブックマークを正とする。保存済みの記録は、説明文と「解析した時点の値」の参照にだけ使い、
+    // 名前・階層パス・属性は現在の値を表示する（削除済みのフォルダは出さない）
+    const states = listFolderStates(tree);
+    const staleReasons = new Map(findStaleFolders(tree, descriptions, metaList).map(s => [s.folderId, s.reason]));
+    const folders = metaList.filter(meta => states.has(meta.folder_id));
+    categoryCount.textContent = String(folders.length);
     tableContainer.replaceChildren();
-    if (metaList.length === 0) {
+    if (folders.length === 0) {
       tableContainer.textContent = "同期されたフォルダ構造データはありません。ボタンを押して解析してください。";
       return;
     }
 
-    const rows = metaList.flatMap(folder => {
-      const rowClass = folder.is_untouchable ? "category-row-untouchable" : "category-row-normal";
+    const rows = folders.flatMap(meta => {
+      const state = states.get(meta.folder_id);
+      const rowClass = state.isUntouchable ? "category-row-untouchable" : "category-row-normal";
+      const staleReason = staleReasons.get(meta.folder_id);
       const badges = [
-        folder.is_quick_access ? h("span", { className: "attr-badge attr-badge-bar", text: "Bookmarkバー" }) : null,
-        folder.is_untouchable ? h("span", { className: "attr-badge attr-badge-lock", text: "保護" }) : null
+        state.isQuickAccess ? h("span", { className: "attr-badge attr-badge-bar", text: "Bookmarkバー" }) : null,
+        state.isUntouchable ? h("span", { className: "attr-badge attr-badge-lock", text: "保護" }) : null,
+        staleReason === "名称変更" || staleReason === "場所の変更" ?
+          h("span", { className: "attr-badge attr-badge-warn", text: staleReason + "（再解析推奨）" }) : null
       ];
       return [
         // 上段: フォルダ名と属性バッジ | 説明文（2行ぶち抜き）
         h("tr", { className: rowClass },
-          h("td", { className: "no-bottom-border" }, h("div", { className: "category-name" }, folder.folder_name, badges)),
-          h("td", { className: "category-desc", text: descriptions[folder.folder_id] || (folder.is_untouchable ? PROTECTED_DESCRIPTION : "説明文未生成"), attrs: { rowspan: "2" } })),
+          h("td", { className: "no-bottom-border" }, h("div", { className: "category-name" }, state.name, badges)),
+          h("td", { className: "category-desc", text: descriptions[meta.folder_id] || (state.isUntouchable ? PROTECTED_DESCRIPTION : "説明文未生成"), attrs: { rowspan: "2" } })),
         // 下段: 階層パス（折り返さず、溢れたら省略記号）
         h("tr", { className: rowClass },
-          h("td", { className: "category-path no-top-border", text: folder.hierarchical_categories }))
+          h("td", { className: "category-path no-top-border", text: state.path }))
       ];
     });
 

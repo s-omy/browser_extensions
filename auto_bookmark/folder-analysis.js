@@ -6,10 +6,14 @@ import { ANALYZE_FOLDERS_PER_BATCH, STALE_COUNT_MIN_DIFF, STALE_COUNT_RATIO } fr
 import { KEYS, getFolderDescriptions, getFolderMeta } from "./storage.js";
 
 /**
- * 再解析が必要なフォルダを、ローカルの比較だけで求める（APIは呼ばない）。
- *   未解析 … 説明文がまだない（新しく作ったフォルダなど）
- *   変更   … 前回の解析後に、ブックマーク数が大きく増減した
- * @returns {{folderId: string, folderName: string, reason: "未解析"|"変更"}[]}
+ * 再解析が必要なフォルダを、ローカルの比較だけで求める（APIは呼ばない）。1フォルダにつき理由は1つで、
+ * 次の優先順位で決める。
+ *   未解析     … 説明文がまだない（新しく作ったフォルダなど）
+ *   名称変更   … 説明文を生成した時点から、フォルダ名が変わった
+ *   場所の変更 … フォルダ名は同じで、階層パスが変わった（移動、または親フォルダの改名）
+ *   変更       … 前回の解析後に、ブックマーク数が大きく増減した
+ * 生成時点の名前・パスは meta.analyzed_name / analyzed_path。無い旧形式のデータでは、保存されていた名前・パスを代わりに使う。
+ * @returns {{folderId: string, folderName: string, reason: "未解析"|"名称変更"|"場所の変更"|"変更"}[]}
  */
 export function findStaleFolders(bookmarkTree, descriptions, metaList) {
   const metaById = new Map(metaList.map(meta => [meta.folder_id, meta]));
@@ -20,7 +24,18 @@ export function findStaleFolders(bookmarkTree, descriptions, metaList) {
       stale.push({ folderId: folder.folder_id, folderName: folder.folder_name, reason: "未解析" });
       continue;
     }
-    const analyzedCount = metaById.get(folder.folder_id)?.analyzed_entry_count;
+    const meta = metaById.get(folder.folder_id);
+    const analyzedName = meta?.analyzed_name ?? meta?.folder_name;
+    const analyzedPath = meta?.analyzed_path ?? meta?.hierarchical_categories;
+    if (analyzedName !== undefined && analyzedName !== folder.folder_name) {
+      stale.push({ folderId: folder.folder_id, folderName: folder.folder_name, reason: "名称変更" });
+      continue;
+    }
+    if (analyzedPath !== undefined && analyzedPath !== folder.hierarchical_categories) {
+      stale.push({ folderId: folder.folder_id, folderName: folder.folder_name, reason: "場所の変更" });
+      continue;
+    }
+    const analyzedCount = meta?.analyzed_entry_count;
     if (typeof analyzedCount === "number") {
       const threshold = Math.max(STALE_COUNT_MIN_DIFF, Math.ceil(analyzedCount * STALE_COUNT_RATIO));
       if (Math.abs(folder.entries.length - analyzedCount) >= threshold) {
@@ -84,20 +99,24 @@ export async function analyzeFolders({ connection, bookmarkTree, privacy, onlyFo
   }
 
   // 階層パス・属性・件数は、全フォルダ分を最新の状態で保存する。
-  // 「解析時の件数」は、今回説明文を生成したフォルダだけ更新する（他は以前の値を保つ）
+  // 「解析時の件数・名前・パス」は、今回説明文を生成したフォルダだけ更新する（他は以前の値を保つ）
   await chrome.storage.local.set({
     [KEYS.FOLDER_DESCRIPTIONS]: buildDescriptions(),
-    [KEYS.FOLDER_META]: extractedFolders.map(folder => ({
-      folder_id: folder.folder_id,
-      folder_name: folder.folder_name,
-      hierarchical_categories: folder.hierarchical_categories,
-      is_quick_access: folder.is_quick_access,
-      is_untouchable: folder.is_untouchable,
-      entry_count: folder.entries.length,
-      analyzed_entry_count: describedById.has(folder.folder_id) ?
-        folder.entries.length :
-        previousMeta.get(folder.folder_id)?.analyzed_entry_count
-    }))
+    [KEYS.FOLDER_META]: extractedFolders.map(folder => {
+      const described = describedById.has(folder.folder_id);
+      const previous = previousMeta.get(folder.folder_id);
+      return {
+        folder_id: folder.folder_id,
+        folder_name: folder.folder_name,
+        hierarchical_categories: folder.hierarchical_categories,
+        is_quick_access: folder.is_quick_access,
+        is_untouchable: folder.is_untouchable,
+        entry_count: folder.entries.length,
+        analyzed_entry_count: described ? folder.entries.length : previous?.analyzed_entry_count,
+        analyzed_name: described ? folder.folder_name : (previous?.analyzed_name ?? previous?.folder_name),
+        analyzed_path: described ? folder.hierarchical_categories : (previous?.analyzed_path ?? previous?.hierarchical_categories)
+      };
+    })
   });
 
   return {

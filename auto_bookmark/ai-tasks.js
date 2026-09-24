@@ -7,6 +7,7 @@
 import { callGemini, processWithBisect, describeGeminiError } from "./gemini.js";
 import { ANALYZE_SAMPLE_ENTRIES } from "./config.js";
 import { isAiSendableUrl, sanitizeUrlForAi } from "./privacy.js";
+import { getKeywords, normalizeKeywords } from "./keywords.js";
 
 // 「適合するフォルダがない」ことを示す、folder_id の enum に加える特別値
 const UNCLASSIFIED_CHOICE = "UNCLASSIFIED";
@@ -241,7 +242,7 @@ export async function judgeRelocationChunk({ connection, chunk, categories, cand
       url: sanitizeUrlForAi(b.url, privacy),
       current_folder_id: b.current_folder_id, // 移動不要な場合にAIが target_folder_id へ指定するID
       ai_knowledge_context: cache ?
-        { subject: cache.subject, summary: cache.summary, description: cache.description, keyword: cache.keyword } :
+        { subject: cache.subject, summary: cache.summary, description: cache.description, keywords: getKeywords(cache) } :
         "無し"
     };
   });
@@ -295,7 +296,8 @@ export async function judgeRelocationChunk({ connection, chunk, categories, cand
  */
 export async function fetchKnowledgeBatch(connection, items, privacy) {
   const prompt =
-    "各入力（id, url, title）について、URLとタイトルから、セーフティ誤判定されないクリーンなテーマ概要文脈オブジェクト(subject, summary, description, keyword)を生成してください。" +
+    "各入力（id, url, title）について、URLとタイトルから、セーフティ誤判定されないクリーンなテーマ概要文脈オブジェクト(subject, summary, description, keywords)を生成してください。" +
+    "keywords は、空白や区切り文字（カンマ・読点など）を含まない1語ずつの配列で返してください。複数語の概念は、machine_learning または MachineLearning のように1語にまとめてください（例: [\"React\", \"JavaScript\", \"machine_learning\"]）。" +
     "ページ本文は与えられていないため、URLとタイトルから推定できる範囲で書いてください。" +
     "入力のidをそのまま付けて、全件を1つずつ返してください。";
   const responseSchema = {
@@ -310,9 +312,9 @@ export async function fetchKnowledgeBatch(connection, items, privacy) {
             subject: { type: "STRING" },
             summary: { type: "STRING" },
             description: { type: "STRING" },
-            keyword: { type: "STRING" }
+            keywords: { type: "ARRAY", items: { type: "STRING" } }
           },
-          required: ["id", "subject", "summary", "description", "keyword"]
+          required: ["id", "subject", "summary", "description", "keywords"]
         }
       }
     },
@@ -337,7 +339,8 @@ export async function fetchKnowledgeBatch(connection, items, privacy) {
     subItems.forEach((item, index) => {
       const r = resultById.get(String(index + 1));
       if (r) {
-        done.set(item.url, { subject: r.subject, summary: r.summary, description: r.description, keyword: r.keyword });
+        // AIが区切りや空白を含む要素を返しても、1語ずつのタグにそろえて保存する
+        done.set(item.url, { subject: r.subject, summary: r.summary, description: r.description, keywords: normalizeKeywords(r.keywords) });
       } else {
         failed.push({ url: item.url, reason: "AIの応答に含まれていませんでした" });
       }

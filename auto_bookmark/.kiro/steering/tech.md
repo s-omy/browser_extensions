@@ -29,7 +29,7 @@ Chrome 拡張（Manifest V3）。**ビルド工程のない素の ES モジュ�
 - リトライは 429/5xx/通信エラーのみ（指数バックオフ＋ジッター）。ブロック・途切れ・JSON 不正は対象を二分割して再試行し、原因の項目だけを切り分ける。
 
 ### Testing
-- 自動テストは `tests/`。**Node 不要**のブラウザ実行式で、`chrome.*` と `fetch` をモックし、実モジュールを `import` して検証する（135件）。
+- 自動テストは `tests/`。**Node 不要**のブラウザ実行式で、`chrome.*` と `fetch` をモックし、実モジュールを `import` して検証する。
 - 実 Chrome・実 AI API・見た目・OS 依存挙動は自動テストの対象外（手動確認）。
 
 ## Development Environment
