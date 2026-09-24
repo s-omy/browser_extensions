@@ -26,10 +26,10 @@ function buildTree() {
 const seededKnowledgeBase = () => {
   const old = Date.now() - 40 * 24 * 3600 * 1000;
   return {
-    "https://pathchange.example/": { subject: "s", summary: "s", description: "d", keyword: "k1, k2", hierarchical_categories: "旧", last_updated_at: Date.now(), source: "ai_estimate" },
-    "https://expired.example/": { subject: "old", summary: "o", description: "o", keyword: "o", hierarchical_categories: "A", last_updated_at: old },
-    "https://deleted.example/": { subject: "gone", summary: "g", description: "g", keyword: "g", hierarchical_categories: "A", last_updated_at: Date.now() },
-    "https://meta.example/": { subject: "メタ", summary: "実meta", description: "実meta", keyword: "m1", hierarchical_categories: "A", last_updated_at: Date.now(), source: "page_meta" }
+    "https://pathchange.example/": { subject: "s", summary: "s", description: "d", keywords: ["k1", "k2"], hierarchical_categories: "旧", last_updated_at: Date.now(), source: "ai_estimate" },
+    "https://expired.example/": { subject: "old", summary: "o", description: "o", keywords: ["o"], hierarchical_categories: "A", last_updated_at: old },
+    "https://deleted.example/": { subject: "gone", summary: "g", description: "g", keywords: ["g"], hierarchical_categories: "A", last_updated_at: Date.now() },
+    "https://meta.example/": { subject: "メタ", summary: "実meta", description: "実meta", keywords: ["m1"], hierarchical_categories: "A", last_updated_at: Date.now(), source: "page_meta" }
   };
 };
 
@@ -42,7 +42,7 @@ const ctx = lazy(async () => {
       const input = JSON.parse(req.body.contents[0].parts[1].text);
       batches.push(input);
       if (input.some(i => i.url.includes("bad.example"))) return blocked("PROHIBITED_CONTENT");
-      return okJson({ items: input.map(i => ({ id: i.id, subject: "S:" + i.title, summary: "sum", description: "desc", keyword: "k1, k2" })) });
+      return okJson({ items: input.map(i => ({ id: i.id, subject: "S:" + i.title, summary: "sum", description: "desc", keywords: ["k1", "k2"] })) });
     }
   });
 
@@ -77,7 +77,7 @@ const ctx = lazy(async () => {
   const beforeCount = Object.keys(env.storage.page_knowledge_base).length;
   document.querySelector(".tag-add-btn").click();
   await wait(300);
-  const editedUrl = Object.keys(env.storage.page_knowledge_base).find(u => env.storage.page_knowledge_base[u].keyword.includes("新タグ"));
+  const editedUrl = Object.keys(env.storage.page_knowledge_base).find(u => env.storage.page_knowledge_base[u].keywords.includes("新タグ"));
   document.querySelector(".tag-delete-btn").click();
   await wait(300);
   const tagEdit = {
@@ -95,9 +95,9 @@ describe("ナレッジ同期: 計画（ローカル計算のみ、画面を開�
     assert(c.initial.plan.includes("AIに送信しないURL"), "送信しない件数の注記がある");
   });
 
-  test("蓄積済みのナレッジ一覧に、出所（AI推定 / meta）のバッジを表示する", async () => {
+  test("蓄積済みのナレッジ一覧に、出所（AI推定 / meta）のバッジを表示する（削除済みページは画面を開いた時点で整理済み）", async () => {
     const c = await ctx();
-    assertEqual(c.initial.sourceBadges, ["AI推定", "AI推定", "AI推定", "meta"]);
+    assertEqual(c.initial.sourceBadges, ["AI推定", "AI推定", "meta"]);
   });
 });
 

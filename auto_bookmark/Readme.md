@@ -45,6 +45,8 @@ tests/                自動テスト（詳細は tests/README.md）
 | `ai-tasks.js` | AI に依頼する各タスクのプロンプト・応答スキーマ・応答の検証 |
 | `bookmarks.js` | ブックマークツリーの走査、階層パス、保護フォルダの判定、候補フォルダの組み立て |
 | `storage.js` | `chrome.storage.local` のキー定義と、旧形式からの移行 |
+| `keywords.js` | ページ知識のキーワードを、語の配列にそろえる（区切り・重複・空の扱い）。DOM・chrome 非依存の純粋関数 |
+| `reconcile.js` | 削除・改名・移動を、AI を呼ばずに保存データへ反映する整合処理と、実行中の排他 |
 | `privacy.js` | AI へ送る URL の制限（http/https のみ・除外ドメイン・クエリ除去） |
 | `folder-analysis.js` | ① フォルダ解析（バッチ処理・増分保存・再解析が必要なフォルダの検出） |
 | `relocation.js` | ② 再カテゴライズの計画・シミュレーション・適用・取り消し |
@@ -60,6 +62,7 @@ tests/                自動テスト（詳細は tests/README.md）
 | `ui-relocate.js` / `ui-diff.js` | ② / 差分の描画（Unified・Split） |
 | `ui-knowledge.js` | ③ |
 | `ui-log.js` | ④ |
+| `ui-reconcile.js` | 整合処理の呼び出しと、結果（反映した件数・失敗）の通知 |
 
 依存の向き: `ui-*` → 各ワークフロー（`folder-analysis` / `relocation` / `knowledge`）→ `ai-tasks` → `gemini`。`background.js` も同じ層を使います。
 
@@ -147,6 +150,22 @@ sequenceDiagram
     UI->>R: undoRelocation（記録を逆順に復元）
 ```
 
+### 4.4 保存データの整合（削除・改名・移動の反映）
+
+ブックマークの現在の状態を「正」とし、保存データを AI なし（課金なし）で揃える。実行するのは、設定画面を開いたときと、①②③ の実行前（AI を呼ぶ前）だけで、ブックマークの変更イベントを契機とした即時の整理はしない（サービスワーカーと設定画面の書き込みの競合を避けるため）。
+
+| 保存データ | 整合の内容 |
+|---|---|
+| `folder_descriptions_by_id` | 存在しないフォルダ・保護フォルダの説明文を削除（空のフォルダの説明文は残す） |
+| `folder_meta_tree` | 存在しないフォルダの記録を削除。存在するフォルダは名前・階層パス・属性・件数を現在の値へ更新（`analyzed_*` が無ければ更新前の値で補う） |
+| `page_knowledge_base` | 削除済みページのナレッジを削除、所属パスを更新（キーワード等は変更しない） |
+| `quick_folders` | 存在しないフォルダの ID を除外 |
+
+- ① の一覧は、保存済みの記録ではなく現在のツリーを基準に描画する（削除済みフォルダは出さず、名前・パスは現在の値）。
+- 再解析の要否（`findStaleFolders`）は、理由を 1 フォルダに 1 つ、優先順位「未解析 > 名称変更 > 場所の変更 > ブックマーク数の変化」で判定する。名前・パスは `analyzed_*`（説明文を生成した時点の値）と比較する。親フォルダの改名で子のパスが変わった場合は「場所の変更」になる。改名・移動しただけでは AI を呼ばない（説明文は残し、「再解析推奨」と表示する）。
+- ①③ の実行中は整合を開始しない（`operationLock`）。失敗しても画面と各操作は続け、通知欄に警告を出す。
+- 何度実行しても同じ結果になり、変更が無ければ何も書き込まない。ブックマーク自体は一切変更しない。
+
 ## 5. データモデル（`chrome.storage.local`）
 
 定義は `storage.js` の冒頭コメントが正です。
@@ -160,11 +179,11 @@ sequenceDiagram
 | `privacy_settings` | `{ strip_query: boolean, excluded_domains: string[] }` | AI へ送る URL の制限 |
 | `quick_folders` | string[] | 右クリックメニューに載せるフォルダの ID |
 | `folder_descriptions_by_id` | `{ フォルダID: 説明文 }` | ① の結果。**フォルダ名ではなく ID をキーにする**（同名フォルダを区別するため） |
-| `folder_meta_tree` | object[] | `{ folder_id, folder_name, hierarchical_categories, is_quick_access, is_untouchable, entry_count, analyzed_entry_count }`。`analyzed_entry_count` は説明文を生成した時点の件数で、再解析が必要かの判定に使う |
-| `page_knowledge_base` | `{ URL: {...} }` | ③ のナレッジ。`{ subject, summary, description, keyword, hierarchical_categories, last_updated_at, source }`。`source` は `ai_estimate`（URL とタイトルからの AI 推定）または `page_meta`（右クリック時に読み取った実際の meta タグ） |
+| `folder_meta_tree` | object[] | `{ folder_id, folder_name, hierarchical_categories, is_quick_access, is_untouchable, entry_count, analyzed_entry_count, analyzed_name, analyzed_path }`。`analyzed_*` は説明文を生成した時点の件数・名前・階層パスで、再解析が必要か（件数の変化・名称変更・場所の変更）の判定に使う。それ以外の名前・パス・属性・件数は整合処理（§4.4）が現在の値へ更新する |
+| `page_knowledge_base` | `{ URL: {...} }` | ③ のナレッジ。`{ subject, summary, description, keywords, hierarchical_categories, last_updated_at, source }`。`keywords` は**語の配列（1語=1タグ）**で、区切り文字・空白を含まない（複数語の概念は `machine_learning` / `MachineLearning` の書き方）。`source` は `ai_estimate`（URL とタイトルからの AI 推定）または `page_meta`（右クリック時に読み取った実際の meta タグ） |
 | `relocation_undo` | `{ applied_at, moves: [...] }` | 直前の一括適用の取り消し用記録（移動前の親フォルダ・位置） |
 | `gemini_log` / `gemini_usage` | 配列 / object | 動作ログ（直近50件、使用したプロバイダを含む）と累計トークン。`gemini.js` が管理 |
-| `storage_version` | number | データ形式の版数（現在 2） |
+| `storage_version` | number | データ形式の版数（現在 3）。2→3 で、ページ知識の `keyword`（区切り付きの文字列）を `keywords`（配列）へ変換した |
 
 補足:
 
@@ -270,6 +289,8 @@ API キーは URL ではなくヘッダ（Gemini: `x-goog-api-key`、OpenAI 互�
 - Chrome 系ブラウザ向け。ブックマークバーの ID はツリーの先頭要素から取得している（他ブラウザは未検証）。
 - ② と ① の対象は「直下にブックマークがあるフォルダ」。ブックマークバー／その他のブックマーク直下に置かれたブックマーク自体は、再カテゴライズの対象外。
 - ナレッジは URL とタイトルからの **AI の推定** で、ページ本文は取得していない（右クリック登録時の meta を除く）。精度は限定的。
+- キーワードは「1語=1タグ」で、空白・読点・`/` なども区切りとして扱う。そのため `machine learning` は 2 タグになり、`CI/CD` も `CI` と `CD` に分かれる。1タグにしたい語は `machine_learning` / `MachineLearning` のように書く（AI にもそう指示している）。右クリック時にページ自身の meta が空白区切りで書かれている場合も、語ごとに分かれる。
+- 保存データの整合（§4.4）は、設定画面を開いたときと ①②③ の実行前にだけ行う。設定画面を開いていない間のブックマークの変更は、次にそのどちらかが起きるまで保存データに反映されない。改名・移動したフォルダの説明文は、再解析するまで古いまま残り、右クリックの自動振り分けもその説明文を判断材料に使う（設定画面には「再解析推奨」と表示される）。
 - ③ でセーフティにブロックされ続ける URL は保存されず、同期のたびに再試行される（1 件ずつの問い合わせになる）。
 - 取り消しは直前の 1 回分のみ。適用後に自分で動かしたブックマークは、取り消しても戻さない。
 - 動作ログの書き込みは同一コンテキスト内でだけ直列化している。サービスワーカーと設定画面が同時に書くと、まれに 1 件欠ける可能性がある。
@@ -279,5 +300,5 @@ API キーは URL ではなくヘッダ（Gemini: `x-goog-api-key`、OpenAI 互�
 ## 12. 開発メモ
 
 - コード整形は `.editorconfig`（インデント2スペース・CRLF）と `.prettierrc.json` に合わせる。
-- 自動テスト（135件）は `tests/` にある。Node.js 不要で、`chrome.*` と `fetch`（Gemini形式・OpenAI互換形式の両方）をモックしたブラウザページから、実際の各モジュールを `import` して検証する。実行方法は [tests/README.md](tests/README.md) を参照。**ブラウザの HTTP キャッシュがソース変更後も古い `.js` を返すことがある**ため、`tests/serve.py`（`Cache-Control: no-store` を付与）を使い、疑わしいときはポート番号を変えて開き直す。
+- 自動テスト（193件）は `tests/` にある。Node.js 不要で、`chrome.*` と `fetch`（Gemini形式・OpenAI互換形式の両方）をモックしたブラウザページから、実際の各モジュールを `import` して検証する。実行方法は [tests/README.md](tests/README.md) を参照。**ブラウザの HTTP キャッシュがソース変更後も古い `.js` を返すことがある**ため、`tests/serve.py`（`Cache-Control: no-store` を付与）を使い、疑わしいときはポート番号を変えて開き直す。
 - コメントは「何のために・なぜ」を書く。変更履歴はコミットログと [Note.md](Note.md) に残す。

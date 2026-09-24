@@ -9,8 +9,8 @@ import { defaultSelection, deselectLowConfidence, renderDiff, selectAllMoved } f
 const MAX_FAILED_NAMES_SHOWN = 3;
 const PROGRESS_CLEAR_DELAY_MS = 3000; // 完了後、進捗の「(100%)」表示を消すまでの時間
 
-/** @param {{onApiCall: () => void}} hooks */
-export function initRelocate({ onApiCall }) {
+/** @param {{onApiCall: () => void, reconcile?: () => Promise<unknown>}} hooks reconcile … AIを呼ぶ前に、保存データを現在のブックマークへ整合させる */
+export function initRelocate({ onApiCall, reconcile = async () => {} }) {
   const relocateBtn = document.getElementById("relocate-btn");
   const progressText = document.getElementById("relocate-progress-text");
   const progressPercent = document.getElementById("relocate-progress-percent");
@@ -41,6 +41,7 @@ export function initRelocate({ onApiCall }) {
       return;
     }
 
+    await reconcile(); // 判断材料（説明文・ナレッジ）を、現在のブックマークに合わせてから使う
     try {
       relocateBtn.disabled = true;
       diffSection.hidden = true;

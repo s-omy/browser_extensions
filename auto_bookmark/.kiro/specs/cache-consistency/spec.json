@@ -1,0 +1,22 @@
+{
+  "feature_name": "cache-consistency",
+  "created_at": "2026-09-24T07:10:31Z",
+  "updated_at": "2026-09-24T07:40:00Z",
+  "language": "ja",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}

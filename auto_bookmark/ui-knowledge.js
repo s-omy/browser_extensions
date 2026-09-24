@@ -3,14 +3,16 @@
 import { UNTITLED_LABEL } from "./bookmarks.js";
 import { KB_BATCH_SIZE } from "./config.js";
 import { describeGeminiError } from "./gemini.js";
+import { getKeywords, normalizeKeywords } from "./keywords.js";
+import { operationLock } from "./reconcile.js";
 import { KNOWLEDGE_SOURCE, applyLocalKbUpdates, collectBookmarksForKb, computeKbSyncPlan, runKbSync } from "./knowledge.js";
 import { KEYS, getLlmConnection, getKnowledgeBase, getPrivacySettings } from "./storage.js";
 import { TONE, h, isSafeLinkUrl, setStatus } from "./ui-common.js";
 
 const SOURCE_LABELS = { [KNOWLEDGE_SOURCE.AI_ESTIMATE]: "AI推定", [KNOWLEDGE_SOURCE.PAGE_META]: "meta" };
 
-/** @param {{onApiCall: () => void}} hooks */
-export function initKnowledge({ onApiCall }) {
+/** @param {{onApiCall: () => void, reconcile?: () => Promise<unknown>}} hooks reconcile … AIを呼ぶ前に、保存データを現在のブックマークへ整合させる */
+export function initKnowledge({ onApiCall, reconcile = async () => {} }) {
   const syncBtn = document.getElementById("kb-sync-btn");
   const stopBtn = document.getElementById("kb-stop-btn");
   const planText = document.getElementById("kb-plan-text");
@@ -51,6 +53,7 @@ export function initKnowledge({ onApiCall }) {
       return;
     }
 
+    await reconcile(); // 削除済みページの整理・所属パスの更新は、ここで済ませる（無料）
     const privacy = await getPrivacySettings();
     const plan = await computeKbSyncPlan(privacy);
     await applyLocalKbUpdates(plan); // AI不要の更新は先に反映する（無料）
@@ -74,6 +77,7 @@ export function initKnowledge({ onApiCall }) {
     }
 
     isSyncRunning = true;
+    operationLock.enter("sync"); // 実行中は整合処理を始めない（保存内容の競合を避ける）
     isStopRequested = false;
     syncBtn.disabled = true;
     stopBtn.disabled = false;
@@ -95,6 +99,7 @@ export function initKnowledge({ onApiCall }) {
       outcome.fatal = error;
     } finally {
       isSyncRunning = false;
+      operationLock.leave("sync");
       syncBtn.disabled = false;
       stopBtn.hidden = true;
       indicator.hidden = true;
@@ -125,19 +130,19 @@ export function initKnowledge({ onApiCall }) {
 
   // ---- ナレッジ一覧 ----
 
-  const parseKeywords = text => (text || "").split(",").map(k => k.trim()).filter(Boolean);
-
   // タグの編集は、同期と競合しないよう保存直前に読み直したナレッジに対して行う
   async function editKeywords(url, edit) {
     const knowledgeBase = await getKnowledgeBase();
     if (!knowledgeBase[url]) return;
-    knowledgeBase[url].keyword = edit(parseKeywords(knowledgeBase[url].keyword)).join(", ");
+    const entry = knowledgeBase[url];
+    entry.keywords = normalizeKeywords(edit(getKeywords(entry)));
+    delete entry.keyword; // 旧形式が残っていれば、ここで keywords に置き換える
     await chrome.storage.local.set({ [KEYS.KNOWLEDGE_BASE]: knowledgeBase });
     await renderTable();
   }
 
   function createKeywordCell(url, cache) {
-    const keywords = parseKeywords(cache.keyword);
+    const keywords = getKeywords(cache);
     const tags = keywords.map(keyword => h("span", { className: "tag-item", text: keyword },
       h("span", {
         className: "tag-delete-btn",
@@ -155,8 +160,9 @@ export function initKnowledge({ onApiCall }) {
       on: {
         click: event => {
           event.stopPropagation();
-          const newTag = (prompt("新しいキーワードを入力してください：") || "").trim();
-          if (newTag) editKeywords(url, list => (list.includes(newTag) ? list : [...list, newTag]));
+          // 空白・カンマなどで区切ると複数のタグとして追加される（重複は追加しない）。複数語の概念は machine_learning のように _ でつなぐ
+          const added = normalizeKeywords(prompt("新しいキーワードを入力してください（空白やカンマで区切ると複数追加。複数語は machine_learning のように _ でつなぎます）：") || "");
+          if (added.length > 0) editKeywords(url, list => [...list, ...added]);
         }
       }
     });

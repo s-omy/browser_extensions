@@ -8,6 +8,7 @@ import { collectFolderInfos, getFolderPathMap, UNCLASSIFIED_FOLDER_NAME } from "
 import { fetchKnowledgeBatch } from "./ai-tasks.js";
 import { isAiSendableUrl } from "./privacy.js";
 import { KB_BATCH_SIZE, KB_TTL_MS } from "./config.js";
+import { normalizeKeywords } from "./keywords.js";
 import { KEYS, getKnowledgeBase } from "./storage.js";
 
 export const KNOWLEDGE_SOURCE = Object.freeze({ AI_ESTIMATE: "ai_estimate", PAGE_META: "page_meta" });
@@ -82,7 +83,7 @@ export async function computeKbSyncPlan(privacy) {
 // 設定画面でのタグ編集と競合しないよう、保存直前にストレージを読み直してから変更する
 async function updateKnowledgeBase(mutate) {
   const knowledgeBase = await getKnowledgeBase();
-  mutate(knowledgeBase);
+  if (mutate(knowledgeBase) === false) return; // 変更が無いときは書き込まない
   await chrome.storage.local.set({ [KEYS.KNOWLEDGE_BASE]: knowledgeBase });
 }
 
@@ -95,6 +96,34 @@ export async function applyLocalKbUpdates(plan) {
     }
     for (const url of plan.staleUrls) delete knowledgeBase[url];
   });
+}
+
+/**
+ * ナレッジを現在のブックマークへ整合させる（APIは呼ばない）。削除済みページのナレッジを取り除き、
+ * 所属パスを現在の値へ更新する。キーワードなど他の項目（利用者が編集したタグを含む）は変更しない。
+ * 変更が無ければ何も書き込まない。
+ * @param {ReturnType<typeof collectBookmarksForKb>} bookmarks 現在のブックマーク（collectBookmarksForKb の結果）
+ * @returns {Promise<{removed: number, updated: number}>}
+ */
+export async function reconcileKnowledgeBase(bookmarks) {
+  const livePaths = new Map(bookmarks.map(bookmark => [bookmark.url, bookmark.hierarchical_categories]));
+  let removed = 0;
+  let updated = 0;
+  await updateKnowledgeBase(knowledgeBase => {
+    removed = 0;
+    updated = 0;
+    for (const url of Object.keys(knowledgeBase)) {
+      if (!livePaths.has(url)) {
+        delete knowledgeBase[url];
+        removed++;
+      } else if (knowledgeBase[url].hierarchical_categories !== livePaths.get(url)) {
+        knowledgeBase[url].hierarchical_categories = livePaths.get(url);
+        updated++;
+      }
+    }
+    return removed + updated > 0; // false を返すと書き込まない
+  });
+  return { removed, updated };
 }
 
 /**
@@ -159,7 +188,7 @@ export async function recordPageMetaKnowledge({ url, title, meta, path }) {
       subject: (title || "").slice(0, SUBJECT_MAX_CHARS),
       summary: meta.description.slice(0, SUMMARY_MAX_CHARS),
       description: meta.description,
-      keyword: meta.keywords,
+      keywords: normalizeKeywords(meta.keywords), // サイトごとに書き方（空白・読点・カンマ）が違うため、1語ずつにそろえる
       hierarchical_categories: path || UNCLASSIFIED_FOLDER_NAME,
       last_updated_at: Date.now(),
       source: KNOWLEDGE_SOURCE.PAGE_META

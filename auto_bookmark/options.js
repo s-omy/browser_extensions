@@ -5,11 +5,13 @@
 //   ui-relocate.js  ② 再カテゴライズ（差分の描画は ui-diff.js）
 //   ui-knowledge.js ③ ページ知識（ナレッジベース）
 //   ui-log.js       ④ 動作ログ
+//   ui-reconcile.js 保存データを現在のブックマークへ整合させる（AIは呼ばない）
 
 import { migrateLegacyStorage } from "./storage.js";
 import { initFolders } from "./ui-folders.js";
 import { initKnowledge } from "./ui-knowledge.js";
 import { initLog } from "./ui-log.js";
+import { initReconcile } from "./ui-reconcile.js";
 import { initRelocate } from "./ui-relocate.js";
 import { initSettings } from "./ui-settings.js";
 
@@ -17,8 +19,12 @@ async function start() {
   // 旧形式のデータを、各ブロックが読み込む前に現行形式へ移行しておく
   await migrateLegacyStorage();
 
+  // 削除・改名・移動を保存データへ反映してから、各ブロックが読み込む（AIは呼ばない。失敗しても画面は続けて表示する）
+  const reconciler = initReconcile();
+  await reconciler.run();
+
   const log = initLog();
-  const hooks = { onApiCall: () => log.refresh() };
+  const hooks = { onApiCall: () => log.refresh(), reconcile: reconciler.run };
 
   initSettings(hooks);
   const folders = initFolders(hooks);

@@ -129,7 +129,7 @@ describe("storage.js: 旧形式（フォルダ名キー）からの移行", () =
     const { env } = await ctx();
     assert(!("folder_descriptions" in env.storage), "旧キーは削除される");
     assertEqual(env.storage.gemini_key, "K", "無関係のキーは保持される");
-    assertEqual(env.storage.storage_version, 2);
+    assertEqual(env.storage.storage_version, 3);
   });
 
   test("2回目以降の呼び出しは何もしない（冪等）", async () => {

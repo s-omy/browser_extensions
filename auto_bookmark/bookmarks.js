@@ -101,6 +101,40 @@ export function buildFolderCandidates(bookmarkTree, descriptions = {}) {
 }
 
 /**
+ * ツリーの全フォルダ（システムフォルダ・空のフォルダを含む）の「現在の状態」を、フォルダIDをキーにして返す。
+ * 保存済みの記録（説明文・フォルダ構造）を現在のブックマークと突き合わせるために使う。
+ * 名前・階層パス・属性の算出規則は extractFolders と同じ。
+ * @returns {Map<string, {id: string, name: string, path: string, isQuickAccess: boolean, isUntouchable: boolean, entryCount: number, isSystemRoot: boolean}>}
+ *   entryCount はフォルダ直下のブックマーク数（サブフォルダ内は含まない）
+ */
+export function listFolderStates(bookmarkTree) {
+  const rootId = bookmarkTree[0].id;
+  const barId = getBookmarksBarId(bookmarkTree);
+  const pathMap = getFolderPathMap(bookmarkTree);
+  const states = new Map();
+
+  (function walk(nodes, parentQuickAccess, parentUntouchable) {
+    for (const node of nodes) {
+      if (node.url || !node.title) continue;
+      const isQuickAccess = node.parentId === barId || parentQuickAccess;
+      const isUntouchable = parentUntouchable || isUntouchableName(node.title);
+      states.set(node.id, {
+        id: node.id,
+        name: node.title,
+        path: pathMap.get(node.id) || node.title,
+        isQuickAccess,
+        isUntouchable,
+        entryCount: (node.children || []).filter(child => child.url).length,
+        isSystemRoot: node.parentId === rootId
+      });
+      if (node.children) walk(node.children, isQuickAccess, isUntouchable);
+    }
+  })(bookmarkTree[0].children, false, false);
+
+  return states;
+}
+
+/**
  * ブックマークを1件以上含むユーザーのフォルダを、属性付きで抽出する。
  * 属性: 階層パス / QuickAccess（ブックマークバー配下） / Untouchable（保護。親から継承）。
  * 件数の上限は設けない（AIへ渡す側でチャンク分割・サンプリングする）。
