@@ -2,110 +2,90 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Neat AI Bookmark 設定</title>
-  <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 1000px; margin: 0 auto; color: #333; }
-    .field { margin-bottom: 25px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
-    label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 15px; }
-    input[type="password"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
-    button { padding: 10px 20px; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-    button:disabled { background: #ccc !important; cursor: not-allowed; }
-    
-    .btn-primary { background: #007bff; }
-    .btn-success { background: #28a745; }
-    .btn-warning { background: #ffc107; color: #212529; }
-    .btn-danger { background: #dc3545; }
-
-    .loader { display: inline-block; margin-left: 10px; color: #6c757d; font-size: 14px; font-weight: bold; }
-    #sync-status, #relocate-status { margin-top: 10px; font-weight: bold; }
-
-    /* --- カリテグの一覧表示用スタイル --- */
-    .category-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
-    .category-table th, .category-table td { padding: 10px 12px; border: 1px solid #ddd; text-align: left; }
-    .category-table th { background-color: #f6f8fa; color: #57606a; }
-    .category-row-normal { background-color: #ffffff; }
-    .category-row-untouchable { background-color: #fff9db; font-style: italic; }
-
-    /* --- ページナレッジベース表の2行レイアウト用スタイル --- */
-    .knowledge-section { margin-top: 30px; border-top: 2px solid #007bff; padding-top: 20px; }
-    .knowledge-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; margin-top: 15px; }
-    .knowledge-table th { background-color: #f2f2f2; border: 1px solid #ccc; padding: 8px; text-align: left; color: #333; }
-    .knowledge-table td { border: 1px solid #ccc; padding: 8px; vertical-align: top; word-wrap: break-word; overflow: hidden; }
-    
-    .row-meta-top { background-color: #ffffff; }
-    .row-meta-bottom { background-color: #fafafa; border-bottom: 2px solid #ddd; }
-    
-    .cell-title { font-weight: bold; color: #0969da; }
-    .cell-label { font-size: 11px; color: #777; display: block; margin-bottom: 2px; }
-
-    /* --- タグライクUI用スタイル --- */
-    .tag-container { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 24px; }
-    .tag-item { display: inline-flex; align-items: center; background-color: #e1ecf4; color: #39739d; border: 1px solid #7aa7c7; border-radius: 3px; padding: 2px 6px; font-size: 11px; font-weight: normal; }
-    .tag-delete-btn { margin-left: 5px; cursor: pointer; color: #c04848; font-weight: bold; font-size: 10px; }
-    .tag-add-btn { background-color: #e1f5fe; color: #0288d1; border: 1px dashed #0288d1; border-radius: 3px; padding: 1px 5px; font-size: 11px; cursor: pointer; font-weight: bold; }
-
-    /* --- Diff Preview スタイル --- */
-    .diff-section-block { margin-top: 20px; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; background: #fff; }
-    .diff-header { background: #f6f8fa; padding: 10px 15px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
-    .diff-view-selector button { padding: 4px 10px; font-size: 12px; background: #fff; color: #57606a; border: 1px solid #d0d7de; border-radius: 4px; margin-left: 5px; }
-    .diff-view-selector button.active { background: #0969da; color: #fff; border-color: #0969da; }
-    
-    .diff-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-    .diff-table th, .diff-table td { padding: 8px 12px; border-bottom: 1px solid #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .diff-table th { background: #f6f8fa; text-align: left; font-weight: bold; color: #57606a; }
-    
-    .diff-row-deleted { background-color: #ffebe9; }
-    .diff-row-added { background-color: #e6ffec; }
-    .diff-row-unchanged { background-color: #fff; color: #6a737d; }
-    
-    .badge { display: inline-block; padding: 2px 6px; font-size: 11px; font-weight: bold; border-radius: 10px; color: white; margin-left: 5px; }
-    .badge-score { background-color: #6f42c1; }
-    
-    .action-cell { width: 70px; text-align: center; }
-    .checkbox-apply { width: 18px; height: 18px; cursor: pointer; }
-    .diff-item-header { background: #f1f8ff; font-weight: bold; border-top: 1px solid #c8e1ff; border-bottom: 1px solid #c8e1ff; }
-    .diff-bookmark-link { text-decoration: none; color: #0969da; font-weight: bold; }
-    .diff-reason-text { font-size: 11px; color: #57606a; font-weight: normal; margin-top: 2px; }
-    .diff-sub-info { font-size: 11px; margin-top: 2px; }
-    .diff-pad-left { padding-left: 24px; }
-    .color-del { color: #cf222e; }
-    .color-add { color: #1a7f37; }
-  </style>
+  <title>ブックマーク整理 by Gemini 設定</title>
+  <link rel="stylesheet" href="options.css">
 </head>
 <body>
-  <h2>Neat AI Bookmark Manager 設定</h2>
-  
-  <!-- 1. APIキー設定 -->
+  <h2>
+    <span>ブックマーク整理 by Gemini 設定</span>
+    <a href="user_guide.html" target="_blank" rel="noopener">📖 使い方ガイド</a>
+  </h2>
+
   <div class="field">
-    <label for="api-key">Gemini API キー (Pay-per-request):</label>
-    <input type="password" id="api-key" placeholder="APIキーを入力">
-    <button id="save-btn" class="btn-primary" style="margin-top: 10px;">キーを保存</button>
-    <div id="status"></div>
+    <label for="llm-provider" class="field-title">AI プロバイダ:</label>
+    <p class="hint">Gemini を直接使うか、LiteLLM Proxy などの OpenAI 互換エンドポイント（自前ホストのものを含む）を使うか選べます。</p>
+    <select id="llm-provider">
+      <option value="gemini">Gemini（Google AI Studio）</option>
+      <option value="openai_compatible">OpenAI 互換エンドポイント（LiteLLM Proxy 等）</option>
+    </select>
+
+    <div id="llm-base-url-field" style="margin-top: 12px;" hidden>
+      <label for="llm-base-url" class="hint">エンドポイントURL（例: http://localhost:4000、または自前ホストのLiteLLM ProxyのURL）</label>
+      <input type="text" id="llm-base-url" placeholder="https://your-litellm-proxy.example.com" autocomplete="off">
+    </div>
+
+    <label for="llm-model" class="hint" style="margin-top: 12px; display: block;">モデル名</label>
+    <input type="text" id="llm-model" placeholder="gemini-3.6-flash" autocomplete="off">
+
+    <label for="api-key" class="hint" style="margin-top: 12px; display: block;">API キー (Pay-per-request)</label>
+    <p class="hint">キーはこの端末のブラウザ内に保存されます（暗号化はされません）。Gemini の場合は Google AI Studio で取得できます。OpenAI 互換の場合は、LiteLLM Proxy 側で発行した仮想キー等を入力してください。</p>
+    <input type="password" id="api-key" placeholder="APIキーを入力" autocomplete="off">
+    <div class="btn-row">
+      <button id="save-btn" class="btn-primary">設定を保存</button>
+      <button id="test-btn" class="btn-secondary">接続テスト</button>
+    </div>
+    <div id="api-key-status" class="status-line"></div>
+
+    <h4>プライバシー設定</h4>
+    <p class="hint">ブックマークのURL・タイトル・ページ情報は、判定のため設定したAIプロバイダへ送信されます。送る範囲を絞れます（http/https 以外のURLは常に送信しません）。</p>
+    <label class="checkbox-line"><input type="checkbox" id="privacy-strip-query"> 送信するURLから、クエリ文字列（?以降）とハッシュ（#以降）を取り除く</label>
+    <label for="privacy-excluded-domains" class="hint">送信しないドメイン（1行に1つ。サブドメインも対象）</label>
+    <textarea id="privacy-excluded-domains" placeholder="example.com&#10;intra.example.co.jp"></textarea>
+    <div class="btn-row">
+      <button id="privacy-save-btn" class="btn-primary btn-small">プライバシー設定を保存</button>
+    </div>
+    <div id="privacy-status" class="status-line"></div>
+
+    <h4>右クリックメニューのクイック保存先</h4>
+    <p class="hint">選んだフォルダが、右クリックメニュー「📑ブックマーク」に並びます（最大5件）。フォルダ名を変えても追従します。</p>
+    <div id="quick-folder-list" class="folder-check-list"></div>
+    <div class="btn-row">
+      <button id="quick-folder-save-btn" class="btn-primary btn-small">クイック保存先を保存</button>
+    </div>
+    <div id="quick-folder-status" class="status-line"></div>
   </div>
 
-  <!-- 2. フォルダコンテキスト解析 -->
   <div class="field">
-    <label>① フォルダコンテキストの自動解析・同期:</label>
-    <p style="font-size: 13px; color: #6c757d; margin-top: 0;">現在のフォルダ階層構造のDescriptionを自動生成・記憶させ、AIの分類精度を最大化します。</p>
-    <button id="analyze-btn" class="btn-success">🔄 AIで全フォルダを解析・更新する</button>
-    <span id="loading-spinner" class="loader"></span>
-    <div id="sync-status"></div>
-    <h4 style="margin-bottom: 5px;">記憶されたフォルダ総数: <span id="category-count">0</span> 件</h4>
-    
-    <!-- 改修: テーブル描画エリア -->
+    <div class="field-title">① フォルダコンテキストの自動解析・同期:</div>
+    <p class="hint">現在のフォルダ階層構造のDescriptionを自動生成・記憶させ、AIの分類精度を高めます。</p>
+    <div class="btn-row">
+      <button id="analyze-btn" class="btn-success">🔄 AIで全フォルダを解析・更新する</button>
+      <button id="analyze-stale-btn" class="btn-success" disabled>✨ 未解析・変更のあるフォルダだけ解析する</button>
+      <span id="analyze-progress-text" class="loader"></span>
+      <span id="analyze-progress-percent" class="progress-percent"></span>
+    </div>
+    <div id="stale-info" class="hint" style="margin-top: 8px;"></div>
+    <div id="analyze-status" class="status-line"></div>
+    <h4>記憶されたフォルダ総数: <span id="category-count">0</span> 件</h4>
     <div id="category-table-container"></div>
   </div>
 
-  <!-- 3. ブックマーク一括再配置 -->
   <div class="field">
-    <label>② ブックマークの再カテゴライズ (一括整理・シミュレーション):</label>
-    <p style="font-size: 13px; color: #6c757d; margin-top: 0;">全ブックマークの適合率(0〜100%)を測定し、最適な配置への変更差分をプレビューします（[アンタッチャブル]フォルダは保護されます）。</p>
-    <button id="relocate-btn" class="btn-warning">🔍 再カテゴライズをシミュレーションする</button>
-    <span id="relocate-spinner" class="loader"></span>
-    <div id="relocate-status"></div>
+    <div class="field-title">② ブックマークの再カテゴライズ (一括整理・シミュレーション):</div>
+    <p class="hint">全ブックマークの適合率(0〜100%)を測定し、最適な配置への変更差分をプレビューします（[アンタッチャブル]フォルダは保護されます）。</p>
+    <div class="btn-row">
+      <button id="relocate-btn" class="btn-warning">🔍 再カテゴライズをシミュレーションする</button>
+      <span id="relocate-progress-text" class="loader"></span>
+      <span id="relocate-progress-percent" class="progress-percent"></span>
+    </div>
+    <div id="relocate-status" class="status-line"></div>
 
-    <!-- Diff プレビュー表示エリア -->
-    <div id="diff-section" style="display: none; margin-top: 20px;">
+    <div id="undo-box" class="notice-box" hidden>
+      <span id="undo-info"></span>
+      <button id="undo-relocate-btn" class="btn-warning btn-small" style="margin-left: 10px;">↩ 元に戻す</button>
+    </div>
+
+    <div id="diff-section" class="diff-section-block" hidden>
       <div class="diff-header">
         <span style="font-weight: bold; color: #24292f;">📋 再配置の変更差分プレビュー</span>
         <div class="diff-view-selector">
@@ -113,22 +93,56 @@
           <button id="btn-view-split">Split (分割)</button>
         </div>
       </div>
+      <div class="diff-controls">
+        <button id="diff-select-all" class="btn-secondary">全選択</button>
+        <button id="diff-select-none" class="btn-secondary">全解除</button>
+        <button id="diff-deselect-low" class="btn-secondary">適合率が低い項目を外す</button>
+        <label class="checkbox-line"><input type="checkbox" id="diff-changed-only" checked> 変更のある項目のみ表示</label>
+        <label>並び順:
+          <select id="diff-sort">
+            <option value="default">フォルダ順</option>
+            <option value="score">適合率の低い順</option>
+          </select>
+        </label>
+        <span id="diff-summary" class="diff-summary"></span>
+      </div>
       <div id="diff-table-container"></div>
-      <div style="margin-top: 15px; text-align: right;">
+      <div style="padding: 15px; text-align: right;">
         <button id="apply-relocate-btn" class="btn-danger" style="font-size: 15px; padding: 12px 24px;">選択した再カテゴライズを実適用する</button>
       </div>
     </div>
   </div>
 
-  <!-- 【新機能ブロック】ブックマークのページコンテキストナレッジベース可視化 -->
   <div class="field knowledge-section">
-    <label>③ ブックマークのページコンテキストナレッジベース</label>
-    <p style="font-size: 13px; color: #6c757d; margin-top: 0;">ローカルストレージに蓄積された無毒化キャッシュデータです。キーワード(タグ)の手動追加・削除が可能です。</p>
-    <div id="kb-sync-indicator" style="font-weight: bold; color: #007bff; margin-bottom: 10px;">⏳ バックグラウンドでナレッジベースを更新中...完了後に表示をロードします</div>
-    
+    <div class="field-title">③ ブックマークのページコンテキスト（AI推定ナレッジ）</div>
+    <p class="hint">ブックマークのURLとタイトルからAIが推定した「大テーマ・要約・キーワード」の蓄積です（ページ本文は取得していません）。右クリック登録時に読み取れたページのmeta情報は「meta」と表示されます。キーワード(タグ)の手動追加・削除が可能です。</p>
+    <p class="hint">ナレッジの取得はボタンを押したときだけ実行されます（この画面を開いただけではAPIを呼びません）。新規・期限切れのブックマークだけを、まとめて問い合わせます。</p>
+    <div class="btn-row">
+      <button id="kb-sync-btn" class="btn-primary">📥 ナレッジベースを同期する</button>
+      <button id="kb-stop-btn" class="btn-danger" hidden>⏹ 中止</button>
+      <span id="kb-plan-text" class="hint" style="margin: 0;"></span>
+    </div>
+    <div id="kb-sync-indicator" class="status-line tone-muted" hidden>
+      ⏳ ナレッジベースを同期中...この画面を開いている間だけ処理されます
+      <span id="kb-progress-percent" class="progress-percent"></span>
+    </div>
+    <div id="kb-sync-status" class="status-line"></div>
     <div id="kb-table-container"></div>
   </div>
 
-  <script src="options.js"></script>
+  <div class="field">
+    <details id="log-section">
+      <summary style="font-weight: bold; font-size: 15px; cursor: pointer;">④ 動作ログ（AI API 呼び出し履歴・累計トークン）</summary>
+      <p class="hint">直近50件のAPI呼び出しの結果（成功・失敗、ブロック理由、リトライ回数、トークン数、使用したプロバイダ）を記録しています。URLやタイトルは記録しません。</p>
+      <div id="log-summary" class="status-line"></div>
+      <div class="btn-row">
+        <button id="log-refresh-btn" class="btn-primary btn-small">再読込</button>
+        <button id="log-clear-btn" class="btn-danger btn-small">ログを消去</button>
+      </div>
+      <div id="log-table-container" style="margin-top: 10px;"></div>
+    </details>
+  </div>
+
+  <script type="module" src="options.js"></script>
 </body>
 </html>
